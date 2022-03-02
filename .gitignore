@@ -1,0 +1,10 @@
+__pycache__/
+data/
+.ipynb_checkpoints/
+
+# IDEA
+.idea/modules.xml
+gradle.xml
+.idea/libraries
+usage.statistics.xml
+shelf/
