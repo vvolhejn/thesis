@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="fe53ba76-3188-4222-9003-51128d447d8b" name="Euler">
+        <fileTransfer rootFolder="/cluster/home/vvolhejn" accessType="SFTP" host="euler.ethz.ch" port="22" sshConfigId="acf0fa4a-1562-4106-ab08-902e7a1db3d5" sshConfig="vvolhejn@euler.ethz.ch:22 agent" authAgent="true">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>
