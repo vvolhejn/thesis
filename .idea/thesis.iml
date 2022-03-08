@@ -3,8 +3,13 @@
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
       <excludeFolder url="file://$MODULE_DIR$/data" />
+      <excludeFolder url="file://$MODULE_DIR$/notebooks/.ipynb_checkpoints" />
+      <excludeFolder url="file://$MODULE_DIR$/thesis/.pytest_cache" />
+      <excludeFolder url="file://$MODULE_DIR$/thesis/.pytest_cache/v" />
+      <excludeFolder url="file://$MODULE_DIR$/thesis.egg-info" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.9 (venv)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
+    <orderEntry type="module" module-name="gjobs" />
   </component>
 </module>
