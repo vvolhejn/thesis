@@ -1,0 +1,104 @@
+# -*-Python-*-
+# Decodes from (loudness, f0). Has a trainable reverb component as well.
+# Since it uses a trainable reverb, training data should all be from the same
+# acoustic environment.
+
+include 'models/ae.gin'
+
+sample_rate = 16000
+
+control_embedding_size = 128
+n_waveshapers = 64
+control_hop = 128
+
+# Encoder
+Autoencoder.encoder = None
+
+# Decoder
+Autoencoder.decoder = @decoders.RnnFcDecoder()
+RnnFcDecoder.rnn_channels = 512
+RnnFcDecoder.rnn_type = 'gru'
+RnnFcDecoder.ch = 512
+RnnFcDecoder.layers_per_stack = 3
+RnnFcDecoder.input_keys = ('ld_scaled', 'f0_scaled')
+#RnnFcDecoder.output_splits = (('amps', 1),
+#                              ('harmonic_distribution', 60),
+#                              ('noise_magnitudes', 65))
+RnnFcDecoder.output_splits = (('embedding', 128), )
+
+# ==============
+# ProcessorGroup
+# ==============
+
+ProcessorGroup.dag = [
+  (@synths.Harmonic(),
+    ['amps', 'harmonic_distribution', 'f0_hz']),
+  (@synths.FilteredNoise(),
+    ['noise_magnitudes']),
+  (@processors.Add(),
+    ['filtered_noise/signal', 'harmonic/signal']),
+  (@effects.Reverb(),
+    ['add/signal']),
+]
+
+# Reverb
+Reverb.name = 'reverb'
+Reverb.reverb_length = sample_rate * 2
+Reverb.trainable = True
+
+
+# ---------------------
+
+# TODO: make NEWT decoder
+
+ProcessorGroup.dag = [
+  (@synths.NEWTHarmonic(),
+    ['harmonic_distribution', 'f0_hz']),
+  # TODO: make this synth
+  (@processors.NEWTBank(),
+    ['newtharmonic/signal', 'newt_controls']),
+  (@synths.FilteredNoise(),
+    ['noise_magnitudes']),
+  (@processors.Add(),
+    ['filtered_noise/signal', 'newtbank/signal']),
+  (@effects.Reverb(),
+    ['add/signal']),
+]
+
+
+#https://github.com/ben-hayes/neural-waveshaping-synthesis/blob/main/neural_waveshaping_synthesis/models/neural_waveshaping.py#L30
+get_model.model = @NeuralWaveshaping
+
+URMPDataModule.batch_size = 8
+
+NeuralWaveshaping.learning_rate = 0.001
+NeuralWaveshaping.lr_decay = 0.9
+NeuralWaveshaping.lr_decay_interval = 10000
+
+trainer_kwargs.max_steps = 120000
+trainer_kwargs.gradient_clip_val = 2.0
+trainer_kwargs.accelerator = 'dp'
+
+#HarmonicOscillator.n_harmonics = 101
+#HarmonicOscillator.sample_rate = %sample_rate
+
+NEWT.n_waveshapers = %n_waveshapers
+NEWT.control_embedding_size = %control_embedding_size
+NEWT.shaping_fn_size = 8
+NEWT.out_channels = 1
+TrainableNonlinearity.depth = 4
+
+ControlModule.control_size = 2
+ControlModule.hidden_size = 128
+ControlModule.embedding_size = %control_embedding_size
+
+noise_synth/TimeDistributedMLP.in_size = %control_embedding_size
+noise_synth/TimeDistributedMLP.hidden_size = %control_embedding_size
+noise_synth/TimeDistributedMLP.out_size = 129
+noise_synth/TimeDistributedMLP.depth = 4
+noise_synth/FIRNoiseSynth.ir_length = 256
+noise_synth/FIRNoiseSynth.hop_length = %control_hop
+
+NeuralWaveshaping.n_waveshapers = %n_waveshapers
+NeuralWaveshaping.control_hop = %control_hop
+NeuralWaveshaping.sample_rate = %sample_rate

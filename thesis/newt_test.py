@@ -1,9 +1,7 @@
-from ddsp import core
-from ddsp import synths
-import numpy as np
 import tensorflow as tf
 
 from thesis import newt
+
 
 class HarmonicTest(tf.test.TestCase):
     def test_output_shape_is_correct(self):
@@ -26,9 +24,31 @@ class HarmonicTest(tf.test.TestCase):
         freq = 440
         f0 = tf.zeros((batch_size, n_samples), dtype=tf.float32) + freq
 
-        x = harm(f0)[0,:,0]
+        x = harm(f0)[0, :, 0]
 
         peaks_mask = (x[1:-1] > x[:-2]) & (x[1:-1] > x[2:])
         n_peaks = sum(peaks_mask)
 
         self.assertBetween(n_peaks, freq - 1, freq + 1)
+
+
+class NEWTWaveshaperTest(tf.test.TestCase):
+    def test_output_shape_is_correct(self):
+        batch_size = 2
+        n_waveshapers = 3
+        control_embedding_size = 8
+        n_samples = 16000
+
+        # control time axis is upsampled to n_samples
+        control = tf.random.normal((batch_size, 100, control_embedding_size))
+        exciter = tf.random.normal((batch_size, n_samples, n_waveshapers))
+
+        shaper = newt.NEWTWaveshaper(
+            n_waveshapers=n_waveshapers,
+            control_embedding_size=control_embedding_size,
+            shaping_fn_hidden_size=16,
+        )
+
+        output = shaper(exciter, control)
+
+        self.assertAllEqual([batch_size, n_samples], output.shape.as_list())

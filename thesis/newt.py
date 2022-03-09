@@ -3,10 +3,12 @@ import math
 import gin
 import tensorflow as tf
 import ddsp
+import ddsp.training
 
 tfkl = tf.keras.layers
 
 from tensorflow.python.ops.numpy_ops import np_config
+
 np_config.enable_numpy_behavior()
 
 
@@ -27,9 +29,7 @@ class NEWTHarmonic(ddsp.processors.Processor):
 
         self.n_outputs = n_outputs
 
-        # NEWT implements this as a 1D conv though it's just a linear layer,
-        # but distributed along the time axis
-        self.harmonic_mixer = tfkl.Conv1D(self.n_outputs, kernel_size=1)
+        self.harmonic_mixer = tfkl.Dense(self.n_outputs)
 
     def _create_harmonic_axis(self, n_harmonics):
         return tf.range(1, n_harmonics + 1, dtype=tf.float32)
@@ -40,7 +40,7 @@ class NEWTHarmonic(ddsp.processors.Processor):
 
     def _create_phase_shift(self, n_harmonics):
         # TODO: why is this important?
-        shift = tf.random.uniform((n_harmonics, ), minval=-math.pi, maxval=math.pi)
+        shift = tf.random.uniform((n_harmonics,), minval=-math.pi, maxval=math.pi)
         return shift
 
     def get_controls(self, f0):
@@ -50,7 +50,9 @@ class NEWTHarmonic(ddsp.processors.Processor):
         phase = math.tau * tf.cumsum(f0, axis=-1) / self.sample_rate
 
         harmonic_phase = self.harmonic_axis * tf.expand_dims(phase, axis=2)
-        harmonic_phase = harmonic_phase + self._create_phase_shift(self.n_harmonics).reshape((1, 1, -1))
+        harmonic_phase = harmonic_phase + self._create_phase_shift(
+            self.n_harmonics
+        ).reshape((1, 1, -1))
 
         antialias_mask = self._create_antialias_mask(f0)
 
@@ -60,94 +62,125 @@ class NEWTHarmonic(ddsp.processors.Processor):
         return mixed
 
 
-@gin.register
-class Harmonic(ddsp.processors.Processor):
-    """Synthesize audio with a bank of harmonic sinusoidal oscillators."""
+class NEWTFc(tf.keras.Sequential):
+    """
+    A fully connected layer, optionally with layer normalization and an activation.
+    """
+
+    def __init__(self, ch=128, nonlinearity="leaky_relu", layer_norm=False, **kwargs):
+        layers = [tfkl.Dense(ch)]
+        if layer_norm:
+            layers.append(tfkl.LayerNormalization())
+
+        if nonlinearity is not None:
+            layers.append(
+                tfkl.Activation(ddsp.training.nn.get_nonlinearity(nonlinearity))
+            )
+
+        super().__init__(layers, **kwargs)
+
+
+class NEWTFcStack(tf.keras.Sequential):
+    """
+    Stack Dense -> LayerNorm -> Leaky ReLU layers.
+    Like the FcStack class from DDSP, but has an output layer with a different size
+    and without a nonlinearity applied
+    """
 
     def __init__(
         self,
-        n_samples=64000,
-        sample_rate=16000,
-        scale_fn=ddsp.core.exp_sigmoid,
-        normalize_below_nyquist=True,
-        amp_resample_method="window",
-        use_angular_cumsum=False,
-        name="harmonic",
+        layers=2,
+        hidden_size=256,
+        out_size=256,
+        nonlinearity="leaky_relu",
+        out_nonlinearity=tf.identity,
+        layer_norm=True,
+        out_layer_norm=False,
+        **kwargs
     ):
-        """Constructor.
-        Args:
-          n_samples: Fixed length of output audio.
-          sample_rate: Samples per a second.
-          scale_fn: Scale function for amplitude and harmonic distribution inputs.
-          normalize_below_nyquist: Remove harmonics above the nyquist frequency
-            and normalize the remaining harmonic distribution to sum to 1.0.
-          amp_resample_method: Mode with which to resample amplitude envelopes.
-            Must be in ['nearest', 'linear', 'cubic', 'window']. 'window' uses
-            overlapping windows (only for upsampling) which is smoother
-            for amplitude envelopes with large frame sizes.
-          use_angular_cumsum: Use angular cumulative sum on accumulating phase
-            instead of tf.cumsum. If synthesized examples are longer than ~100k
-            audio samples, consider use_angular_cumsum to avoid accumulating
-            noticible phase errors due to the limited precision of tf.cumsum.
-            However, using angular cumulative sum is slower on accelerators.
-          name: Synth name.
-        """
+        assert layers >= 2, "Depth must be at least 2"
+
+        layers_list = []
+        for i in range(layers):
+            if i < layers - 1:
+                layers_list.append(NEWTFc(hidden_size, nonlinearity, layer_norm))
+            else:
+                layers_list.append(NEWTFc(out_size, out_nonlinearity, out_layer_norm))
+
+        super().__init__(layers_list, **kwargs)
+
+
+def resample(x, output_size):
+    """
+    Takes a tensor of shape [batch_size, time, channels]
+    and stretches it (linear interpolation) to shape [batch_size, output_size, channels].
+    """
+
+    # tf.image.resize expects the shape [batch_size, w, h, channels] so we need to add
+    # and then remove an extra dimension.
+    y = tf.image.resize(tf.expand_dims(x, 1), [1, output_size])
+    y = tf.squeeze(y, 1)
+    return y
+
+
+@gin.configurable
+class NEWTWaveshaper(ddsp.processors.Processor):
+    """
+    Applies waveshapers to exciter signals.
+    """
+
+    def __init__(
+        self,
+        n_waveshapers: int,
+        control_embedding_size: int,
+        shaping_fn_hidden_size: int = 16,
+        name="newt_waveshaper",
+    ):
         super().__init__(name=name)
-        self.n_samples = n_samples
-        self.sample_rate = sample_rate
-        self.scale_fn = scale_fn
-        self.normalize_below_nyquist = normalize_below_nyquist
-        self.amp_resample_method = amp_resample_method
-        self.use_angular_cumsum = use_angular_cumsum
 
-    def get_controls(self, amplitudes, harmonic_distribution, f0_hz):
-        """Convert network output tensors into a dictionary of synthesizer controls.
-        Args:
-          amplitudes: 3-D Tensor of synthesizer controls, of shape
-            [batch, time, 1].
-          harmonic_distribution: 3-D Tensor of synthesizer controls, of shape
-            [batch, time, n_harmonics].
-          f0_hz: Fundamental frequencies in hertz. Shape [batch, time, 1].
-        Returns:
-          controls: Dictionary of tensors of synthesizer controls.
-        """
-        # Scale the amplitudes.
-        if self.scale_fn is not None:
-            amplitudes = self.scale_fn(amplitudes)
-            harmonic_distribution = self.scale_fn(harmonic_distribution)
+        self.n_waveshapers = n_waveshapers
 
-        harmonic_distribution = ddsp.core.normalize_harmonics(
-            harmonic_distribution,
-            f0_hz,
-            self.sample_rate if self.normalize_below_nyquist else None,
+        self.mlp = NEWTFcStack(
+            hidden_size=control_embedding_size, out_size=n_waveshapers * 4, layers=4
         )
 
-        return {
-            "amplitudes": amplitudes,
-            "harmonic_distribution": harmonic_distribution,
-            "f0_hz": f0_hz,
-        }
-
-    def get_signal(self, amplitudes, harmonic_distribution, f0_hz):
-        """Synthesize audio with harmonic synthesizer from controls.
-        Args:
-          amplitudes: Amplitude tensor of shape [batch, n_frames, 1]. Expects
-            float32 that is strictly positive.
-          harmonic_distribution: Tensor of shape [batch, n_frames, n_harmonics].
-            Expects float32 that is strictly positive and normalized in the last
-            dimension.
-          f0_hz: The fundamental frequency in Hertz. Tensor of shape [batch,
-            n_frames, 1].
-        Returns:
-          signal: A tensor of harmonic waves of shape [batch, n_samples].
-        """
-        signal = ddsp.core.harmonic_synthesis(
-            frequencies=f0_hz,
-            amplitudes=amplitudes,
-            harmonic_distribution=harmonic_distribution,
-            n_samples=self.n_samples,
-            sample_rate=self.sample_rate,
-            amp_resample_method=self.amp_resample_method,
-            use_angular_cumsum=self.use_angular_cumsum,
+        self.input_scale = tf.Variable(
+            tf.random.normal(shape=[1, n_waveshapers, 1], stddev=10),
+            trainable=True,
         )
-        return signal
+
+        self.shaping_fn = NEWTFcStack(
+            hidden_size=shaping_fn_hidden_size,
+            out_size=1,
+            nonlinearity=tf.sin,
+            out_nonlinearity=tf.sin,
+            layer_norm=False,
+            out_layer_norm=False,
+        )
+
+        self.mixer = tfkl.Dense(1)
+
+    def get_controls(self, exciter, control_embedding):
+        return {"exciter": exciter, "control_embedding": control_embedding}
+
+    def get_signal(self, exciter, control_embedding):
+        """
+        :param exciter: tensor of shape [batch_size, n_samples, n_waveshapers]
+        :param control_embedding: tensor of shape
+            [batch_size, n_control_samples, control_embedding_size].
+            n_samples should be a multiple of n_control_samples.
+        :return: the exciters modulated with the waveshapers and mixed down.
+            A tensor of shape [batch_size, n_samples].
+        """
+        film_params = self.mlp(control_embedding)
+        film_params = resample(film_params, exciter.shape[1])
+
+        gamma_index, beta_index, gamma_norm, beta_norm = tf.split(
+            film_params, 4, axis=2
+        )
+
+        x = exciter * gamma_index + beta_index
+        x = self.shaping_fn(x)
+        x = x * gamma_norm + beta_norm
+
+        return tf.squeeze(self.mixer(x), axis=2)
