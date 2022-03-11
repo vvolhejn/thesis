@@ -6,8 +6,12 @@
         <serverdata>
           <mappings>
             <mapping deploy="thesis/" local="$PROJECT_DIR$" web="/" />
-            <mapping deploy="gjobs/" local="$PROJECT_DIR$/../gjobs" web="" />
+            <mapping deploy="gjobs/" local="$PROJECT_DIR$/../gjobs" web="/" />
+            <mapping deploy="ddsp/" local="$PROJECT_DIR$/../ddsp" web="/" />
           </mappings>
+          <excludedPaths>
+            <excludedPath local="true" path="$PROJECT_DIR$/data" />
+          </excludedPaths>
         </serverdata>
       </paths>
     </serverData>

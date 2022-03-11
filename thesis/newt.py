@@ -13,7 +13,7 @@ np_config.enable_numpy_behavior()
 
 
 # See https://github.com/ben-hayes/neural-waveshaping-synthesis/blob/main/neural_waveshaping_synthesis/models/modules/generators.py
-# @gin.configurable
+@gin.configurable
 class NEWTHarmonic(ddsp.processors.Processor):
     """
     Generates harmonics above a fundamental frequency.
@@ -21,13 +21,16 @@ class NEWTHarmonic(ddsp.processors.Processor):
     by a linear layer
     """
 
-    def __init__(self, n_harmonics, n_outputs, sample_rate, name="newt_harmonic"):
+    def __init__(
+        self, n_harmonics, n_outputs, n_samples, sample_rate, name="newt_harmonic"
+    ):
         super().__init__(name=name)
         self.sample_rate = sample_rate
         self.n_harmonics = n_harmonics
         self.harmonic_axis = self._create_harmonic_axis(n_harmonics).reshape((1, 1, -1))
 
         self.n_outputs = n_outputs
+        self.n_samples = n_samples
 
         self.harmonic_mixer = tfkl.Dense(self.n_outputs)
 
@@ -38,26 +41,37 @@ class NEWTHarmonic(ddsp.processors.Processor):
         freqs = tf.expand_dims(f0, axis=2) * self.harmonic_axis
         return freqs < (self.sample_rate / 2)
 
-    def _create_phase_shift(self, n_harmonics):
+    @staticmethod
+    def _create_phase_shift(n_harmonics):
         # TODO: why is this important?
         shift = tf.random.uniform((n_harmonics,), minval=-math.pi, maxval=math.pi)
         return shift
 
     def get_controls(self, f0):
-        return {"f0": f0}
+        f0_upsampled = resample(f0, self.n_samples)
+        f0_upsampled = tf.squeeze(f0_upsampled, axis=2)
 
-    def get_signal(self, f0) -> tf.Tensor:
-        phase = math.tau * tf.cumsum(f0, axis=-1) / self.sample_rate
+        return {"f0_upsampled": f0_upsampled}
+
+    def get_signal(self, f0_upsampled) -> tf.Tensor:
+        phase = math.tau * tf.cumsum(f0_upsampled, axis=-1) / self.sample_rate
 
         harmonic_phase = self.harmonic_axis * tf.expand_dims(phase, axis=2)
         harmonic_phase = harmonic_phase + self._create_phase_shift(
             self.n_harmonics
         ).reshape((1, 1, -1))
 
-        antialias_mask = self._create_antialias_mask(f0)
+        antialias_mask = self._create_antialias_mask(f0_upsampled)
 
         harmonics = tf.sin(harmonic_phase) * tf.cast(antialias_mask, dtype=tf.float32)
         mixed = self.harmonic_mixer(harmonics)
+
+        tf.debugging.assert_shapes(
+            [
+                (f0_upsampled, ("batch_size", "n_samples")),
+                (mixed, ("batch_size", "n_samples", "n_outputs")),
+            ]
+        )
 
         return mixed
 
@@ -119,7 +133,15 @@ def resample(x, output_size):
     # tf.image.resize expects the shape [batch_size, w, h, channels] so we need to add
     # and then remove an extra dimension.
     y = tf.image.resize(tf.expand_dims(x, 1), [1, output_size])
-    y = tf.squeeze(y, 1)
+    y = tf.squeeze(y, axis=1)
+
+    tf.debugging.assert_shapes(
+        [
+            (x, ("batch_size", "time", "channels")),
+            (y, ("batch_size", "output_size", "channels")),
+        ]
+    )
+
     return y
 
 
@@ -172,6 +194,13 @@ class NEWTWaveshaper(ddsp.processors.Processor):
         :return: the exciters modulated with the waveshapers and mixed down.
             A tensor of shape [batch_size, n_samples].
         """
+        tf.debugging.assert_shapes(
+            [
+                (exciter, ("batch_size", "n_samples", "n_waveshapers")),
+                (control_embedding, ("batch_size", "n_control_samples", "n_control")),
+            ]
+        )
+
         film_params = self.mlp(control_embedding)
         film_params = resample(film_params, exciter.shape[1])
 

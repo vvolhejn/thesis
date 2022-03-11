@@ -10,7 +10,7 @@ class HarmonicTest(tf.test.TestCase):
 
         n_samples = 16000
         batch_size = 3
-        f0 = tf.zeros((batch_size, n_samples), dtype=tf.float32) + 440
+        f0 = tf.zeros((batch_size, n_samples, 1), dtype=tf.float32) + 440
 
         output = harm(f0)
 
@@ -22,7 +22,7 @@ class HarmonicTest(tf.test.TestCase):
         n_samples = 16000
         batch_size = 1
         freq = 440
-        f0 = tf.zeros((batch_size, n_samples), dtype=tf.float32) + freq
+        f0 = tf.zeros((batch_size, n_samples, 1), dtype=tf.float32) + freq
 
         x = harm(f0)[0, :, 0]
 

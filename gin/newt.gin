@@ -4,12 +4,13 @@
 # acoustic environment.
 
 include 'models/ae.gin'
+import thesis.newt
 
 sample_rate = 16000
+n_samples = 64000
 
 control_embedding_size = 128
 n_waveshapers = 64
-control_hop = 128
 
 # Encoder
 Autoencoder.encoder = None
@@ -24,81 +25,42 @@ RnnFcDecoder.input_keys = ('ld_scaled', 'f0_scaled')
 #RnnFcDecoder.output_splits = (('amps', 1),
 #                              ('harmonic_distribution', 60),
 #                              ('noise_magnitudes', 65))
-RnnFcDecoder.output_splits = (('embedding', 128), )
+RnnFcDecoder.output_splits = (
+    ('control_embedding', 128),
+    ('noise_magnitudes', 65),
+)
+
+# ---------------------
+#https://github.com/ben-hayes/neural-waveshaping-synthesis/blob/main/neural_waveshaping_synthesis/models/neural_waveshaping.py#L30
+
+
+NEWTHarmonic.n_harmonics = 101
+NEWTHarmonic.sample_rate = %sample_rate
+NEWTHarmonic.n_outputs = %n_waveshapers
+NEWTHarmonic.n_samples = %n_samples
+
+NEWTWaveshaper.n_waveshapers = %n_waveshapers
+NEWTWaveshaper.control_embedding_size = %control_embedding_size
+NEWTWaveshaper.shaping_fn_hidden_size = 8
 
 # ==============
 # ProcessorGroup
 # ==============
 
 ProcessorGroup.dag = [
-  (@synths.Harmonic(),
-    ['amps', 'harmonic_distribution', 'f0_hz']),
+  (@thesis.newt.NEWTHarmonic(),
+    ['f0_hz']),
+  (@NEWTWaveshaper(),
+    ['newt_harmonic/signal', 'control_embedding']),
   (@synths.FilteredNoise(),
     ['noise_magnitudes']),
   (@processors.Add(),
-    ['filtered_noise/signal', 'harmonic/signal']),
+    ['filtered_noise/signal', 'newt_waveshaper/signal']),
   (@effects.Reverb(),
     ['add/signal']),
 ]
 
 # Reverb
 Reverb.name = 'reverb'
-Reverb.reverb_length = sample_rate * 2
+Reverb.reverb_length = 48000
 Reverb.trainable = True
-
-
-# ---------------------
-
-# TODO: make NEWT decoder
-
-ProcessorGroup.dag = [
-  (@synths.NEWTHarmonic(),
-    ['harmonic_distribution', 'f0_hz']),
-  # TODO: make this synth
-  (@processors.NEWTBank(),
-    ['newtharmonic/signal', 'newt_controls']),
-  (@synths.FilteredNoise(),
-    ['noise_magnitudes']),
-  (@processors.Add(),
-    ['filtered_noise/signal', 'newtbank/signal']),
-  (@effects.Reverb(),
-    ['add/signal']),
-]
-
-
-#https://github.com/ben-hayes/neural-waveshaping-synthesis/blob/main/neural_waveshaping_synthesis/models/neural_waveshaping.py#L30
-get_model.model = @NeuralWaveshaping
-
-URMPDataModule.batch_size = 8
-
-NeuralWaveshaping.learning_rate = 0.001
-NeuralWaveshaping.lr_decay = 0.9
-NeuralWaveshaping.lr_decay_interval = 10000
-
-trainer_kwargs.max_steps = 120000
-trainer_kwargs.gradient_clip_val = 2.0
-trainer_kwargs.accelerator = 'dp'
-
-#HarmonicOscillator.n_harmonics = 101
-#HarmonicOscillator.sample_rate = %sample_rate
-
-NEWT.n_waveshapers = %n_waveshapers
-NEWT.control_embedding_size = %control_embedding_size
-NEWT.shaping_fn_size = 8
-NEWT.out_channels = 1
-TrainableNonlinearity.depth = 4
-
-ControlModule.control_size = 2
-ControlModule.hidden_size = 128
-ControlModule.embedding_size = %control_embedding_size
-
-noise_synth/TimeDistributedMLP.in_size = %control_embedding_size
-noise_synth/TimeDistributedMLP.hidden_size = %control_embedding_size
-noise_synth/TimeDistributedMLP.out_size = 129
-noise_synth/TimeDistributedMLP.depth = 4
-noise_synth/FIRNoiseSynth.ir_length = 256
-noise_synth/FIRNoiseSynth.hop_length = %control_hop
-
-NeuralWaveshaping.n_waveshapers = %n_waveshapers
-NeuralWaveshaping.control_hop = %control_hop
-NeuralWaveshaping.sample_rate = %sample_rate
