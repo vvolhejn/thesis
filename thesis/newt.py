@@ -4,6 +4,7 @@ import gin
 import tensorflow as tf
 import ddsp
 import ddsp.training
+import einops
 
 tfkl = tf.keras.layers
 
@@ -209,7 +210,20 @@ class NEWTWaveshaper(ddsp.processors.Processor):
         )
 
         x = exciter * gamma_index + beta_index
+
+        # We add an axis so that [b, t, waveshaper] all act as batch dimensions
+        # and we apply a function f: R->R to each element separately
+        x = einops.rearrange(x, "b t waveshaper -> b t waveshaper 1")
         x = self.shaping_fn(x)
+
+        tf.debugging.assert_shapes(
+            [
+                (exciter, ("batch_size", "n_samples", "n_waveshapers")),
+                (x, ("batch_size", "n_samples", "n_waveshapers", "1")),
+            ]
+        )
+        x = einops.rearrange(x, "b t waveshaper 1 -> b t waveshaper")
+
         x = x * gamma_norm + beta_norm
 
         return tf.squeeze(self.mixer(x), axis=2)
