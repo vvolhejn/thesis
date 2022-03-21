@@ -15,20 +15,35 @@ so the code is based more on the RAVE implementation.
 
 import math
 
+import gin
 import numpy as np
 import tensorflow as tf
 from scipy.signal import kaiser, kaiserord, firwin
 from scipy.optimize import fmin
-from einops import rearrange
+from einops import rearrange, repeat
 
 from tensorflow.python.ops.numpy_ops import np_config
+
+import ddsp
 
 np_config.enable_numpy_behavior()
 
 
 def reverse_half(x):
-    mask = np.ones_like(x)
-    mask[..., ::2, 1::2] = -1
+    # This works but we need a Tensorflow (not Numpy) implementation:
+    # mask = np.ones_like(x)
+    # mask[..., ::2, 1::2] = -1
+    # return x * mask
+    tf.ensure_shape(x, [None, None, None])
+
+    template = tf.convert_to_tensor([[1.0, -1.0], [1.0, 1.0]], dtype=tf.float32)
+    mask = repeat(
+        template,
+        "h w -> b (xh h) (xw w)",
+        b=x.shape[0],
+        xh=x.shape[1] // 2,
+        xw=x.shape[2] // 2,
+    )
 
     return x * mask
 
@@ -105,7 +120,8 @@ def get_prototype(atten, M, N=None):
     return kaiser_filter(wc, atten, N)
 
 
-class PQMF(tf.keras.layers.Layer):
+@gin.configurable
+class PQMFBank(tf.keras.layers.Layer):
     """
     Pseudo Quadrature Mirror Filter multiband decomposition / reconstruction
     Parameters
@@ -194,3 +210,42 @@ class PQMF(tf.keras.layers.Layer):
 
         tf.ensure_shape(y, [None, None, 1])
         return y
+
+
+@gin.configurable
+class PQMFAnalysis(ddsp.processors.Processor):
+    """
+    We need to "sandwich" some processing between PQMF analysis and synthesis,
+    so we make a separate processor for each direction. However, we want the filter bank
+    to be the same for both, so we need a third class with a filter bank that the two
+    processors refer to.
+    """
+
+    def __init__(self, pqmf_bank: PQMFBank, name="pqmf_analysis"):
+        super().__init__(name=name)
+        self.pqmf_bank = pqmf_bank
+
+    def get_controls(self, audio):
+        # [batch, time, 1]
+        tf.ensure_shape(audio, [None, None, 1])
+
+        return {"audio": audio}
+
+    def get_signal(self, audio) -> tf.Tensor:
+        return self.pqmf_bank.analysis(audio)
+
+
+@gin.configurable
+class PQMFSynthesis(ddsp.processors.Processor):
+    def __init__(self, pqmf_bank: PQMFBank, name="pqmf_synthesis"):
+        super().__init__(name=name)
+        self.pqmf_bank = pqmf_bank
+
+    def get_controls(self, audio):
+        # [batch, time, bands]
+        tf.ensure_shape(audio, [None, None, self.pqmf_bank.n_bands])
+
+        return {"audio": audio}
+
+    def get_signal(self, audio) -> tf.Tensor:
+        return self.pqmf_bank.synthesis(audio)[:,:,0]

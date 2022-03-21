@@ -9,9 +9,9 @@ import einops
 tfkl = tf.keras.layers
 
 from tensorflow.python.ops.numpy_ops import np_config
-
 np_config.enable_numpy_behavior()
 
+from thesis.util import resample
 
 # See https://github.com/ben-hayes/neural-waveshaping-synthesis/blob/main/neural_waveshaping_synthesis/models/modules/generators.py
 @gin.configurable
@@ -124,26 +124,6 @@ class NEWTFcStack(tf.keras.Sequential):
 
         super().__init__(layers_list, **kwargs)
 
-
-def resample(x, output_size):
-    """
-    Takes a tensor of shape [batch_size, time, channels]
-    and stretches it (linear interpolation) to shape [batch_size, output_size, channels].
-    """
-
-    # tf.image.resize expects the shape [batch_size, w, h, channels] so we need to add
-    # and then remove an extra dimension.
-    y = tf.image.resize(tf.expand_dims(x, 1), [1, output_size])
-    y = tf.squeeze(y, axis=1)
-
-    tf.debugging.assert_shapes(
-        [
-            (x, ("batch_size", "time", "channels")),
-            (y, ("batch_size", "output_size", "channels")),
-        ]
-    )
-
-    return y
 
 
 @gin.configurable

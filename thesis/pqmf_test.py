@@ -3,7 +3,7 @@ import tensorflow as tf
 from ddsp.losses import SpectralLoss
 from ddsp.colab.colab_utils import audio_bytes_to_np
 
-from thesis.pqmf import PQMF
+from thesis.pqmf import PQMFBank
 
 
 def get_loss(target_audio, audio):
@@ -32,7 +32,7 @@ class PQMFTest(tf.test.TestCase):
         bands = 4
         attenuation = 100
 
-        pqmf = PQMF(attenuation=attenuation, n_bands=bands)
+        pqmf = PQMFBank(attenuation=attenuation, n_bands=bands)
 
         analyzed = pqmf.analysis(audio)
         self.assertEqual(
