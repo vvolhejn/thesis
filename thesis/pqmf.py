@@ -15,6 +15,7 @@ so the code is based more on the RAVE implementation.
 
 import math
 
+import einops
 import gin
 import numpy as np
 import tensorflow as tf
@@ -235,8 +236,7 @@ class PQMFAnalysis(ddsp.training.nn.DictLayer):
 
     # DDSP's homebrew type annotation system - see docstring for DictLayer
     def call(self, audio) -> ["audio_multiband"]:
-        # [batch, time, 1]
-        tf.ensure_shape(audio, [None, None, 1])
+        audio = einops.rearrange(audio, "batch time -> batch time 1")
 
         return self.pqmf_bank.analysis(audio)
 

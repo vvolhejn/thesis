@@ -151,6 +151,7 @@ class MultibandFilteredNoise(ddsp.synths.FilteredNoise):
         return signal
 
 
+@gin.register
 class RAVECNNEncoder(ddsp.training.nn.DictLayer):
     def __init__(self, input_keys, capacity, latent_size, ratios, bias=False):
         """
@@ -201,46 +202,3 @@ class RAVECNNEncoder(ddsp.training.nn.DictLayer):
         )
 
         return res
-
-
-# class VAERegularizationLoss(ddsp.losses.Loss):
-#
-#     def call(self, pred, target, weights=None):
-#         pass
-
-
-class VariationalAutoencoder(ddsp.training.models.Autoencoder):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        assert self.encoder is not None
-
-    def encode(self, features, training=True):
-        """
-        Get conditioning by preprocessing then encoding.
-        Here is the "variational" part: the latents are drawn from a distribution
-        parametrized by the encoder
-        """
-
-        if self.preprocessor is not None:
-            features.update(self.preprocessor(features, training=training))
-
-        if self.encoder is not None:
-            z_dict = self.encoder(features)
-            mean = z_dict["z_mean"]
-            std = tf.math.softplus(z_dict["z_std_raw"]) + 1e-4
-            var = std * std
-
-            # Not clear if TF can differentiate through this
-            # (without the reparametrization trick)
-            # z = tf.random.normal(mean.shape, mean=mean, stddev=std)
-            z = tf.random.normal(mean.shape) * mean + std
-
-            kl = tf.reduce_mean(
-                tf.reduce_sum((mean * mean + var - tf.math.log(var) - 1), axis=1)
-            )
-            self._losses_dict.update({"kl_loss": kl})
-
-            features.update(z_dict)
-            features.update({"z": z, "kl": kl})
-
-        return features

@@ -1,0 +1,56 @@
+# -*-Python-*-
+# Decodes from (loudness, f0). Has a trainable reverb component as well.
+# Since it uses a trainable reverb, training data should all be from the same
+# acoustic environment.
+
+include 'models/ae.gin'
+include 'halfrave.gin'
+import thesis.rave
+import thesis.pqmf
+import thesis.vae
+
+# Constant values here: https://github.com/caillonantoine/RAVE/blob/1.0/train_rave.py
+n_bands = 16  # because DATA_SIZE = 16
+# LATENT_SIZE = 128 (the input to the network)
+# CAPACITY = 64 (the output of the network. Each subsampling layer doubles the #samples and halves the hidden size,
+# reaching the hidden size CAPACITY in the end.
+# So there is no one equivalent value of `ch`.
+decoder_output_channels = 128
+
+get_model.model = @VariationalAutoencoder()
+
+VariationalAutoencoder:
+    preprocessor = @PQMFAnalysis()
+    encoder = @RAVECNNEncoder()
+    decoder = @decoders.DilatedConvDecoder()
+    kl_loss_weight = 0.1  # RAVE seems to have used this value before using a cyclic schedule
+
+RAVECNNEncoder:
+    input_keys = ("audio_multiband", )
+    capacity = 64
+    latent_size = 128
+    # TODO: try the original ratios of [4, 4, 4, 2]?
+    #       Now we use DilatedConvDecoder which requires a fixed ratio (stride) so it's not possible.
+    ratios = [4, 4, 4, 4]
+    bias = True
+
+
+DilatedConvDecoder:
+    input_keys = ("z", )
+    # in RAVE, RATIOS = [4, 4, 4, 2] meaning there's 4 stacks, upsampling with a ratio of 4x4x4x2=128
+    # We need to match the ratios in the encoder to reach the original sample rate
+    stacks = 4
+    resample_stride = 4
+
+# ---------------------
+#https://github.com/ben-hayes/neural-waveshaping-synthesis/blob/main/neural_waveshaping_synthesis/models/neural_waveshaping.py#L30
+
+
+# This is not used in halfrave
+PQMFAnalysis:
+    pqmf_bank = @PQMFBank()
+
+# We produce 65536 samples and need 64000, so cut off this many
+Crop:
+    frame_size = 96
+    crop_location = 'back'
