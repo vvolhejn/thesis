@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#bsub -n 4 -W 24:00 -N -R "rusage[ngpus_excl_p=1]" < ./train_ddsp.sh
+
 
 SAVE_DIR=~/thesis/data/train_newt
 TRAIN_TFRECORD_FILEPATTERN=$HOME'/prog/thesis/data/data.tfrecord*'

@@ -12,43 +12,46 @@ n_samples = 64000
 control_embedding_size = 128
 n_waveshapers = 64
 
-# Encoder
-Autoencoder.encoder = None
+Autoencoder:
+    encoder = None
+    decoder = @decoders.RnnFcDecoder()
 
-# Decoder
-Autoencoder.decoder = @decoders.RnnFcDecoder()
-RnnFcDecoder.rnn_channels = 512
-RnnFcDecoder.rnn_type = 'gru'
-RnnFcDecoder.ch = 512
-RnnFcDecoder.layers_per_stack = 3
-RnnFcDecoder.input_keys = ('ld_scaled', 'f0_scaled')
+RnnFcDecoder:
+    rnn_channels = 512
+    rnn_type = 'gru'
+    ch = 512
+    layers_per_stack = 3
+    input_keys = ('ld_scaled', 'f0_scaled')
+    output_splits = (
+        ('control_embedding', 128),
+        ('noise_magnitudes', 65),
+    )
 #RnnFcDecoder.output_splits = (('amps', 1),
 #                              ('harmonic_distribution', 60),
 #                              ('noise_magnitudes', 65))
-RnnFcDecoder.output_splits = (
-    ('control_embedding', 128),
-    ('noise_magnitudes', 65),
-)
+
 
 # ---------------------
 #https://github.com/ben-hayes/neural-waveshaping-synthesis/blob/main/neural_waveshaping_synthesis/models/neural_waveshaping.py#L30
 
 
-NEWTHarmonic.n_harmonics = 101
-NEWTHarmonic.sample_rate = %sample_rate
-NEWTHarmonic.n_outputs = %n_waveshapers
-NEWTHarmonic.n_samples = %n_samples
+NEWTHarmonic:
+    n_harmonics = 101
+    sample_rate = %sample_rate
+    n_outputs = %n_waveshapers
+    n_samples = %n_samples
 
-NEWTWaveshaper.n_waveshapers = %n_waveshapers
-NEWTWaveshaper.control_embedding_size = %control_embedding_size
-NEWTWaveshaper.shaping_fn_hidden_size = 8
+NEWTWaveshaper:
+    n_waveshapers = %n_waveshapers
+    control_embedding_size = %control_embedding_size
+    shaping_fn_hidden_size = 8
 
 # ==============
 # ProcessorGroup
 # ==============
 
 ProcessorGroup.dag = [
-  (@thesis.newt.NEWTHarmonic(),
+  (@NEWTHarmonic(),
     ['f0_hz']),
   (@NEWTWaveshaper(),
     ['newt_harmonic/signal', 'control_embedding']),
@@ -61,6 +64,7 @@ ProcessorGroup.dag = [
 ]
 
 # Reverb
-Reverb.name = 'reverb'
-Reverb.reverb_length = 48000
-Reverb.trainable = True
+Reverb:
+    name = 'reverb'
+    reverb_length = 48000
+    trainable = True
