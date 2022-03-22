@@ -21,10 +21,9 @@ import tensorflow as tf
 from scipy.signal import kaiser, kaiserord, firwin
 from scipy.optimize import fmin
 from einops import rearrange, repeat
-
+import ddsp.training
 from tensorflow.python.ops.numpy_ops import np_config
 
-import ddsp
 
 np_config.enable_numpy_behavior()
 
@@ -213,7 +212,7 @@ class PQMFBank(tf.keras.layers.Layer):
 
 
 @gin.configurable
-class PQMFAnalysis(ddsp.processors.Processor):
+class PQMFAnalysis(ddsp.training.nn.DictLayer):
     """
     We need to "sandwich" some processing between PQMF analysis and synthesis,
     so we make a separate processor for each direction. However, we want the filter bank
@@ -225,13 +224,20 @@ class PQMFAnalysis(ddsp.processors.Processor):
         super().__init__(name=name)
         self.pqmf_bank = pqmf_bank
 
-    def get_controls(self, audio):
+    # def get_controls(self, audio):
+    #     # [batch, time, 1]
+    #     tf.ensure_shape(audio, [None, None, 1])
+    #
+    #     return {"audio": audio}
+    #
+    # def get_signal(self, audio) -> tf.Tensor:
+    #     return self.pqmf_bank.analysis(audio)
+
+    # DDSP's homebrew type annotation system - see docstring for DictLayer
+    def call(self, audio) -> ["audio_multiband"]:
         # [batch, time, 1]
         tf.ensure_shape(audio, [None, None, 1])
 
-        return {"audio": audio}
-
-    def get_signal(self, audio) -> tf.Tensor:
         return self.pqmf_bank.analysis(audio)
 
 
@@ -248,4 +254,4 @@ class PQMFSynthesis(ddsp.processors.Processor):
         return {"audio": audio}
 
     def get_signal(self, audio) -> tf.Tensor:
-        return self.pqmf_bank.synthesis(audio)[:,:,0]
+        return self.pqmf_bank.synthesis(audio)[:, :, 0]
