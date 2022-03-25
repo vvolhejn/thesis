@@ -109,14 +109,14 @@ def console_entry_point():
     parser.add_argument(
         "-b",
         "--base-dir",
-        default="~/data",
+        default="/cluster/scratch/vvolhejn/models",
         help="Directory under which the models are saved",
     )
     parser.add_argument("-n", "--name", help="Human-readable identifier suffix")
     parser.add_argument(
         "-d",
         "--dataset",
-        default="$HOME'/data/data.tfrecord*'",
+        default="'/cluster/home/vvolhejn/datasets/violin/violin.tfrecord*'",
         help="An absolute glob pattern of .tfrecord files to use",
     )
     parser.add_argument(
@@ -150,6 +150,11 @@ def console_entry_point():
         steps_per_save = int(gin_params["train_util.train.num_steps"]) // 100
         assert steps_per_save > 0
         gin_params["train_util.train.steps_per_save"] = str(steps_per_save)
+
+    if "train_util.train.steps_per_summary" not in gin_params:
+        gin_params["train_util.train.steps_per_summary"] = gin_params[
+            "train_util.train.steps_per_save"
+        ]
 
     job_dir = create_job_dir(args.base_dir, args.name, args.gin_file)
 

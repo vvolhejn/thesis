@@ -5,6 +5,7 @@ import ddsp
 import ddsp.training
 import einops
 
+from thesis.pqmf import PQMFSynthesis
 from thesis.util import resample
 
 # https://github.com/caillonantoine/RAVE/blob/1.0/rave/model.py#L236
@@ -15,10 +16,13 @@ class RAVEWaveformGenerator(ddsp.processors.Processor):
     and produces a multiband waveform.
     """
 
-    def __init__(self, n_samples, n_bands, name="rave_waveform_generator"):
+    def __init__(
+        self, n_samples, n_bands, do_resample=False, name="rave_waveform_generator"
+    ):
         super().__init__(name=name)
         self.n_samples = n_samples
         self.n_bands = n_bands
+        self.do_resample = do_resample
 
         self.wave_gen = tfkl.Conv1D(
             filters=self.n_bands,
@@ -35,6 +39,11 @@ class RAVEWaveformGenerator(ddsp.processors.Processor):
     def get_controls(self, control_embedding):
         # [batch, n_samples_multiband, ch]
         # control_embedding = resample(control_embedding, self.n_samples // self.n_bands)
+        if self.do_resample:
+            control_embedding = resample(
+                control_embedding, self.n_samples // self.n_bands
+            )
+
         tf.ensure_shape(control_embedding, [None, self.n_samples // self.n_bands, None])
         return {"control_embedding": control_embedding}
 
@@ -202,3 +211,25 @@ class RAVECNNEncoder(ddsp.training.nn.DictLayer):
         )
 
         return res
+
+
+@gin.register
+def summarize_rave(outputs, step):
+    audios_with_labels = [
+        (outputs["audio"][0], "Original"),
+        (outputs["audio_synth"][0], "Synthesized"),
+    ]
+
+    # The arguments should be provided by Gin.
+    pqmf_synthesis = PQMFSynthesis()
+
+    for multiband_audio, label in [
+        (outputs["multiband_filtered_noise"]["signal"], "Filtered noise"),
+        (outputs["rave_waveform_generator"]["signal"], "Waveform generator"),
+    ]:
+        audio = pqmf_synthesis(multiband_audio[:1])
+        audios_with_labels.append((audio[0], label))
+
+    ddsp.training.summaries.spectrogram_array_summary(
+        audios_with_labels, name="spectrograms", step=step
+    )

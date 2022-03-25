@@ -1,7 +1,4 @@
 # -*-Python-*-
-# Decodes from (loudness, f0). Has a trainable reverb component as well.
-# Since it uses a trainable reverb, training data should all be from the same
-# acoustic environment.
 
 include 'models/ae.gin'
 include 'halfrave.gin'

@@ -99,3 +99,5 @@ MultibandFilteredNoise:
 Crop:
     frame_size = 0
     crop_location = 'back'
+
+train_util.train.model_specific_summary_fn = @summarize_rave

@@ -9,6 +9,7 @@ import einops
 tfkl = tf.keras.layers
 
 from tensorflow.python.ops.numpy_ops import np_config
+
 np_config.enable_numpy_behavior()
 
 from thesis.util import resample
@@ -125,7 +126,6 @@ class NEWTFcStack(tf.keras.Sequential):
         super().__init__(layers_list, **kwargs)
 
 
-
 @gin.configurable
 class NEWTWaveshaper(ddsp.processors.Processor):
     """
@@ -207,3 +207,17 @@ class NEWTWaveshaper(ddsp.processors.Processor):
         x = x * gamma_norm + beta_norm
 
         return tf.squeeze(self.mixer(x), axis=2)
+
+
+@gin.register
+def summarize_newt(outputs, step):
+    audios_with_labels = [
+        (outputs["audio"][0], "Original"),
+        (outputs["audio_synth"][0], "Synthesized"),
+        (outputs["filtered_noise"]["signal"][0], "Filtered noise"),
+        (outputs["newt_waveshaper"]["signal"][0], "Waveshaper"),
+    ]
+
+    ddsp.training.summaries.spectrogram_array_summary(
+        audios_with_labels, name="spectrograms", step=step
+    )

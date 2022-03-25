@@ -1,4 +1,8 @@
+import gin
 import tensorflow as tf
+from rich.pretty import pprint
+
+import ddsp.training
 
 
 def resample(x, output_size):
@@ -20,3 +24,20 @@ def resample(x, output_size):
     )
 
     return y
+
+
+def print_tensors_concisely(x):
+    x = ddsp.training.train_util.summarize_tensors(x)
+    pprint(x)
+
+
+@gin.register
+def summarize_generic(outputs, step):
+    audios_with_labels = [
+        (outputs["audio"][0], "Original"),
+        (outputs["audio_synth"][0], "Synthesized"),
+    ]
+
+    ddsp.training.summaries.spectrogram_array_summary(
+        audios_with_labels, name="spectrograms", step=step
+    )

@@ -1,0 +1,25 @@
+# -*-Python-*-
+
+include 'halfrave.gin'
+import thesis.rave
+import thesis.pqmf
+import thesis.util
+
+DilatedConvDecoder:
+    stacks = 4
+    resample_stride = 2
+
+# No noise generator.
+ProcessorGroup.dag = [
+  (@processors.Crop(),
+    ['control_embedding']),
+  (@RAVEWaveformGenerator(),
+    ['crop/signal']),
+  (@PQMFSynthesis(),
+    ['rave_waveform_generator/signal']),
+]
+
+RAVEWaveformGenerator:
+    do_resample = True
+
+train_util.train.model_specific_summary_fn = @thesis.util.summarize_generic

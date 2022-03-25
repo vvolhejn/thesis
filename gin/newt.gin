@@ -68,3 +68,5 @@ Reverb:
     name = 'reverb'
     reverb_length = 48000
     trainable = True
+
+train_util.train.model_specific_summary_fn = @summarize_newt

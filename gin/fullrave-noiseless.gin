@@ -1,0 +1,19 @@
+# -*-Python-*-
+
+include 'models/ae.gin'
+include 'fullrave.gin'
+import thesis.rave
+import thesis.pqmf
+import thesis.vae
+
+# No noise generator.
+ProcessorGroup.dag = [
+  (@processors.Crop(),
+    ['control_embedding']),
+  (@RAVEWaveformGenerator(),
+    ['crop/signal']),
+  (@PQMFSynthesis(),
+    ['rave_waveform_generator/signal']),
+]
+
+train_util.train.model_specific_summary_fn = @thesis.util.summarize_generic
