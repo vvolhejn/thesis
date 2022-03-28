@@ -9,30 +9,33 @@ import argparse
 import datetime
 import os
 
-template = r"""#{job_dir}
-
-SAVE_DIR={base_dir}/{job_dir}
-TRAIN_TFRECORD_FILEPATTERN={dataset_pattern} 
-
+HEADER = r"""
 module load gcc/8.2.0
 module load python_gpu/3.8.5
 module load libsndfile ffmpeg eth_proxy cuda/11.1.1 cudnn/8.1.0.77
 
 source venv/bin/activate
 
+# Print machine info
 nvidia-smi
+lscpu
+
+"""
+
+COMMAND_TEMPLATE = r"""
+SAVE_DIR={base_dir}/{job_dir}
+TRAIN_TFRECORD_FILEPATTERN={dataset_pattern} 
 
 nas_run \
-  --mode=train \
+  --mode={mode} \
   --alsologtostderr \
   --save_dir="$SAVE_DIR" \
   --allow_memory_growth \
   --gin_search_path=/cluster/home/vvolhejn/thesis/gin/ \
-  --gin_file={gin_file} \
-  --gin_file=datasets/tfrecord.gin \
-  --gin_param="TFRecordProvider.file_pattern='$TRAIN_TFRECORD_FILEPATTERN'" \
+  {mode_specific_params} \
   {gin_params}
 """
+
 #   --gin_param="train_util.train.num_steps=2000000" \
 #   --gin_param="train_util.train.steps_per_save=10000" \
 
@@ -50,18 +53,29 @@ class ParseGinParams(argparse.Action):
             getattr(namespace, self.dest)[key] = value
 
 
-def prepare_job(base_dir, job_dir, dataset_pattern, gin_file, gin_params):
-    gin_params_s = " \\\n  ".join(
-        f'--gin_param="{k}={v}"' for (k, v) in gin_params.items()
-    )
+def prepare_job(
+    mode, comment, base_dir, job_dir, dataset_pattern, gin_params, mode_specific_params
+):
 
-    job = template.format(
-        base_dir=base_dir,
-        job_dir=job_dir,
-        dataset_pattern=dataset_pattern,
-        gin_file=gin_file,
-        gin_params=gin_params_s,
-    )
+    job = f"#{comment}\n"
+    job += HEADER
+
+    job += f"SAVE_DIR={base_dir}/{job_dir}\n"
+    job += f"TRAIN_TFRECORD_FILEPATTERN={dataset_pattern}\n"
+    job += "\n"
+
+    params = [
+        f"--mode={mode}",
+        "--alsologtostderr",
+        '--save_dir="$SAVE_DIR"',
+        "--allow_memory_growth",
+        "--gin_search_path=/cluster/home/vvolhejn/thesis/gin/",
+    ]
+
+    params += mode_specific_params
+    params += [f'--gin_param="{k}={v}"' for (k, v) in gin_params.items()]
+
+    job += " \\\n  ".join(["nas_run"] + params)
 
     return job
 
@@ -104,43 +118,10 @@ def create_job_dir(base_dir, name, gin_file):
     return res
 
 
-def console_entry_point():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-b",
-        "--base-dir",
-        default="/cluster/scratch/vvolhejn/models",
-        help="Directory under which the models are saved",
-    )
-    parser.add_argument("-n", "--name", help="Human-readable identifier suffix")
-    parser.add_argument(
-        "-d",
-        "--dataset",
-        default="'/cluster/home/vvolhejn/datasets/violin/violin.tfrecord*'",
-        help="An absolute glob pattern of .tfrecord files to use",
-    )
-    parser.add_argument(
-        "-g",
-        "--gin-file",
-        required=True,
-        help="Filename of the .gin file describing the model (e.g. 'newt.gin')",
-    )
-    parser.add_argument("-s", "--steps", help="Number of training steps", type=int)
-    parser.add_argument(
-        "-p",
-        "--gin-params",
-        nargs="*",
-        action=ParseGinParams,
-        help="Additional Gin parameters passed like key1=value key2=value2",
-    )
-
-    args = parser.parse_args()
-
-    gin_params = args.gin_params or DEFAULT_GIN_PARAMS.copy()
-
+def add_default_training_gin_params(gin_params, steps):
     if "train_util.train.num_steps" not in gin_params:
-        gin_params["train_util.train.num_steps"] = args.steps or 30000
-    elif args.steps:
+        gin_params["train_util.train.num_steps"] = steps or 30000
+    elif steps:
         raise ValueError(
             "Number of training steps set both through --steps and --gin-params"
         )
@@ -156,9 +137,85 @@ def console_entry_point():
             "train_util.train.steps_per_save"
         ]
 
-    job_dir = create_job_dir(args.base_dir, args.name, args.gin_file)
 
-    job = prepare_job(args.base_dir, job_dir, args.dataset, args.gin_file, gin_params)
+def console_entry_point():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--mode",
+        default="train",
+        choices=["train", "eval"],
+        help="Whether to train or eval",
+    )
+    parser.add_argument(
+        "-b",
+        "--base-dir",
+        default="/cluster/scratch/vvolhejn/models",
+        help="Directory under which the models are saved",
+    )
+    parser.add_argument(
+        "-j",
+        "--job-dir",
+        help="For evaluation: the directory of the model to evaluate, "
+        "relative to the base dir.",
+    )
+    parser.add_argument("-n", "--name", help="Human-readable identifier suffix")
+    parser.add_argument(
+        "-d",
+        "--dataset",
+        default="'/cluster/home/vvolhejn/datasets/violin/violin.tfrecord*'",
+        help="An absolute glob pattern of .tfrecord files to use",
+    )
+    parser.add_argument(
+        "-g",
+        "--gin-file",
+        help="For training: Filename of the .gin file "
+        "describing the model (e.g. 'newt.gin')",
+    )
+    parser.add_argument("-s", "--steps", help="Number of training steps", type=int)
+    parser.add_argument(
+        "-p",
+        "--gin-params",
+        nargs="*",
+        action=ParseGinParams,
+        help="Additional Gin parameters passed like key1=value key2=value2",
+    )
+
+    args = parser.parse_args()
+
+    gin_params = args.gin_params or DEFAULT_GIN_PARAMS.copy()
+
+    if args.mode == "train":
+        assert args.gin_file is not None, "You must specify --gin-file when training."
+
+        add_default_training_gin_params(gin_params, args.steps)
+
+        job_dir = create_job_dir(args.base_dir, args.name, args.gin_file)
+
+        mode_specific_params = [
+            f"--gin_file={args.gin_file}",
+            "--gin_file=datasets/tfrecord.gin",
+            "--gin_param=\"TFRecordProvider.file_pattern='$TRAIN_TFRECORD_FILEPATTERN'\"",
+        ]
+        comment = job_dir
+    elif args.mode == "eval":
+        mode_specific_params = []
+
+        job_dir = args.job_dir
+        assert job_dir is not None, "You must specify --job-dir when evaluating."
+
+        comment = f"eval {job_dir}"
+    else:
+        raise ValueError(f"Unknown mode '{args.mode}'")
+
+    job = prepare_job(
+        args.mode,
+        comment,
+        args.base_dir,
+        job_dir,
+        args.dataset,
+        gin_params,
+        mode_specific_params,
+    )
     print(job)
 
 
