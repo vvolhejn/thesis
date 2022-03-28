@@ -1,0 +1,8 @@
+import thesis.evaluate
+
+evaluators = [
+    @BasicEvaluator,
+]
+
+nas_evaluate.evaluator_classes = %evaluators
+nas_evaluate.data_provider = @data.TFRecordProvider()

@@ -4,6 +4,9 @@ data/
 *.egg-info/
 .pytest_cache/
 
+# Tensorboard logs
+logdir/
+
 # IDEA
 .idea/modules.xml
 gradle.xml

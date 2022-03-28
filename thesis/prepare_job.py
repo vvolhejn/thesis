@@ -22,7 +22,7 @@ source venv/bin/activate
 
 nvidia-smi
 
-ddsp_run \
+nas_run \
   --mode=train \
   --alsologtostderr \
   --save_dir="$SAVE_DIR" \

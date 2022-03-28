@@ -3,10 +3,9 @@ Based on DDSP's eval_utils, but the requirements are different (we care a lot ab
 speed) so it made sense to create a separate module.
 """
 
-import cProfile
-import pstats
 import os
 import time
+from typing import Dict
 
 import plotly.express as px
 from codetiming import Timer
@@ -103,88 +102,30 @@ def nas_evaluate(
                 restore_dir,
             )
 
-        with cProfile.Profile() as pr:
-            for batch_idx in range(1, num_batches + 1):
-                start_time = time.time()
-                logging.info("Predicting batch %d of size %d", batch_idx, batch_size)
-                try:
-                    with Timer("prediction", logger=None):
-                        evaluate_or_sample_batch(
-                            model,
-                            data_provider,
-                            dataset_iter,
-                            evaluators,
-                            mode,
-                            evaluate_and_sample,
-                            step,
-                        )
+        for batch_idx in range(1, num_batches + 1):
+            logging.info("Predicting batch %d of size %d", batch_idx, batch_size)
+            try:
+                evaluate_or_sample_batch(
+                    model,
+                    data_provider,
+                    dataset_iter,
+                    evaluators,
+                    mode,
+                    evaluate_and_sample,
+                    step,
+                )
 
-                except StopIteration:
-                    logging.info("End of dataset.")
-                    break
-
-            logging.info(
-                "Metrics for batch %i with size %i took %.1f seconds",
-                batch_idx,
-                batch_size,
-                time.time() - start_time,
-            )
-
-        # stats = pstats.Stats(pr)
-        # stats.sort_stats("cumtime")
-        # stats.print_stats(0.1)  # Print the top 10%
-        # stats.print_stats(r"/cluster/home/vvolhejn/(thesis|ddsp)")
-        # stats.dump_stats(os.path.join(save_dir, "profile.prof"))
+            except StopIteration:
+                logging.info("End of dataset.")
+                break
 
         logging.info(
             "All %d batches in checkpoint took %.1f seconds",
             num_batches,
-            Timer.timers["prediction"],
+            Timer.timers["Autoencoder"],
         )
 
-        logging.info(Timer.timers)
-        for timer_name in Timer.timers:
-            logging.info(
-                f"{timer_name}: {Timer.timers.count(timer_name)}, {Timer.timers.mean(timer_name)}"
-            )
-
-        dummy_batch = next(iter(dataset))["audio"]
-        batch_sample_length_secs = (
-            dummy_batch.shape[0] * dummy_batch.shape[1] / sample_rate
-        )
-
-        columns = {k: np.array(v) for k, v in Timer.timers._timings.items()}
-        # columns["real_time_factor"] = columns["prediction"] / batch_sample_length_secs
-
-        # Add an ordering
-        columns_l = list(columns.items())
-        values = np.array([v for k, v in columns_l]).T
-
-        table = wandb.Table(
-            data=[[k, v.mean(), v.std()] for k, v in columns_l],
-            # data=[[s, s / batch_sample_length_secs] for s in prediction_times],
-            columns=["part_name", "mean", "std"],
-            # [k for k, v in columns_l]
-        )
-        fig = plot_times_hierarchy()
-
-        wandb.log(
-            {
-                "prediction_time_secs": Timer.timers.mean("prediction"),
-                "real_time_factor": Timer.timers.mean("prediction")
-                / batch_sample_length_secs,
-                "prediction_times_histogram": wandb.plot.histogram(
-                    table, "prediction", title="Prediction Time (seconds)"
-                ),
-                "real_time_factors_histogram": wandb.plot.histogram(
-                    table, "real_time_factor", title="Real-Time factor"
-                ),
-                "time_distribution": wandb.plot.bar(
-                    table, "part_name", "mean", title="Time distribution"
-                ),
-                "time_hierarchy": fig,
-            }
-        )
+        log_timing_info(dataset, sample_rate)
 
         if mode == "eval" or evaluate_and_sample:
             for evaluator in evaluators:
@@ -207,7 +148,8 @@ def evaluate_or_sample_batch(
 
     # TODO: Find a way to add losses with training=False.
 
-    outputs, losses = model(batch, return_losses=True, training=False)
+    with Timer("Autoencoder", logger=None):
+        outputs, losses = model(batch, return_losses=True, training=False)
 
     outputs["audio_gen"] = model.get_audio_from_outputs(outputs)
     for evaluator in evaluators:
@@ -217,19 +159,43 @@ def evaluate_or_sample_batch(
             evaluator.sample(batch, outputs, step)
 
 
-def plot_times_hierarchy():
-    timers = dict(Timer.timers.copy())
-    timers["Autoencoder"] = timers["prediction"]
-    del timers["prediction"]
+def log_timing_info(dataset, sample_rate):
+    dummy_batch = next(iter(dataset))["audio"]
+    batch_sample_length_secs = dummy_batch.shape[0] * dummy_batch.shape[1] / sample_rate
 
-    items = list(Timer.timers.items())
+    table = wandb.Table(
+        data=[
+            [k, Timer.timers.mean(k), Timer.timers.stdev(k)]
+            for k in Timer.timers._timings.keys()
+        ],
+        columns=["model_part", "mean", "std"],
+    )
+    time_hierarchy_plot = plot_time_hierarchy(
+        {k: Timer.timers.mean(k) for k in Timer.timers._timings.keys()}
+    )
+
+    wandb.log(
+        {
+            "prediction_time_secs": Timer.timers.mean("Autoencoder"),
+            "real_time_factor": Timer.timers.mean("Autoencoder")
+            / batch_sample_length_secs,
+            "time_distribution": wandb.plot.bar(
+                table, "model_part", "mean", title="Time distribution"
+            ),
+            "time_hierarchy": time_hierarchy_plot,
+        }
+    )
+
+
+def plot_time_hierarchy(data: Dict[str, float]):
+    items = list(data.items())
     names = [k.split(".")[-1] for k, v in items]
     values = [v for k, v in items]
 
     def get_parent(name):
         return ".".join(name.split(".")[:-1])
 
-    parents = [get_parent(name) for name in names]
+    parents = [get_parent(k) for k, v in items]
     data = {"name": names, "parent": parents, "value": values}
 
     fig = px.icicle(
