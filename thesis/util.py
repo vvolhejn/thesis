@@ -1,3 +1,5 @@
+import datetime
+
 import gin
 import tensorflow as tf
 from rich.pretty import pprint
@@ -41,3 +43,24 @@ def summarize_generic(outputs, step):
     ddsp.training.summaries.spectrogram_array_summary(
         audios_with_labels, name="spectrograms", step=step
     )
+
+
+@gin.register
+def summarize_ddspae(outputs, step):
+    audios_with_labels = [
+        (outputs["audio"][0], "Original"),
+        (outputs["audio_synth"][0], "Synthesized"),
+        (outputs["filtered_noise"]["signal"][0], "Filtered noise"),
+        (outputs["harmonic"]["signal"][0], "Harmonic synth"),
+    ]
+
+    ddsp.training.summaries.spectrogram_array_summary(
+        audios_with_labels, name="spectrograms", step=step
+    )
+
+
+def get_today_string():
+    """ 0331, 0611 etc. """
+    today = datetime.date.today()
+    date_s = today.strftime("%m%d")
+    return date_s

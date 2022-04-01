@@ -19,16 +19,20 @@ import numpy as np
 
 
 # ---------------------- Evaluation --------------------------------------------
+from thesis.timbre_transfer_util import adjust_batch, load_dataset_statistics
+from thesis.util import get_today_string
+
+
 @gin.configurable
 def nas_evaluate(
     data_provider,
     model,
     evaluator_classes=None,
     mode="eval",
-    save_dir="/tmp/ddsp/training",
+    save_dir="/tmp/ddsp.gin/training",
     restore_dir="",
     batch_size=1,
-    num_batches=10,
+    num_batches=1,
     evaluate_and_sample=False,
 ):
     """Run evaluation.
@@ -80,7 +84,7 @@ def nas_evaluate(
     wandb_run = wandb.init(
         project="neural-audio-synthesis-thesis",
         entity="neural-audio-synthesis-thesis",
-        # name=os.path.basename(save_dir),
+        name=f"{get_today_string()}-eval-{os.path.basename(save_dir)}",
         sync_tensorboard=True,
         # config=flag_values_dict,
         dir="/cluster/scratch/vvolhejn/wandb",
@@ -105,10 +109,11 @@ def nas_evaluate(
         for batch_idx in range(1, num_batches + 1):
             logging.info("Predicting batch %d of size %d", batch_idx, batch_size)
             try:
+                batch = next(dataset_iter)
                 evaluate_or_sample_batch(
                     model,
                     data_provider,
-                    dataset_iter,
+                    batch,
                     evaluators,
                     mode,
                     evaluate_and_sample,
@@ -127,6 +132,8 @@ def nas_evaluate(
 
         log_timing_info(dataset, sample_rate)
 
+        sample_timbre_transfer(model)
+
         if mode == "eval" or evaluate_and_sample:
             for evaluator in evaluators:
                 evaluator.flush(step)
@@ -137,10 +144,8 @@ def nas_evaluate(
 
 
 def evaluate_or_sample_batch(
-    model, data_provider, dataset_iter, evaluators, mode, evaluate_and_sample, step
+    model, data_provider, batch, evaluators, mode, evaluate_and_sample, step
 ):
-    batch = next(dataset_iter)
-
     if isinstance(data_provider, data.SyntheticNotes):
         batch["audio"] = model.generate_synthetic_audio(batch)
         batch["f0_confidence"] = tf.ones_like(batch["f0_hz"])[:, :, 0]
@@ -207,3 +212,54 @@ def plot_time_hierarchy(data: Dict[str, float]):
     )
 
     return fig
+
+
+def sample_timbre_transfer(model):
+    data_provider = ddsp.training.data.TFRecordProvider(
+        file_pattern="/cluster/home/vvolhejn/datasets/transfer2/transfer2.tfrecord*"
+    )
+
+    dataset = data_provider.get_batch(batch_size=1, shuffle=True, repeats=1)
+
+    dataset_stats = load_dataset_statistics(
+        "/cluster/home/vvolhejn/datasets/violin/dataset_statistics_violin.pkl"
+    )
+
+    for i, batch in enumerate(dataset):
+        if i % 5 != 0:
+            continue
+
+        # logging.info(f'before {batch}')
+        max_loudness_before = batch["loudness_db"].max()
+        batch = adjust_batch(batch, dataset_stats)
+        max_loudness_after = batch["loudness_db"].max()
+
+        logging.info(
+            f"Loudness adjusted from {max_loudness_before:.2f}"
+            f" to {max_loudness_after:.2f}."
+        )
+
+        if batch['mask_on'].mean() < 0.5:
+            # An mostly silent segment.
+            # A completely silent one can be detected by `batch["loudness_db"].max() == -80`
+            continue
+
+        outputs, losses = model(batch, return_losses=True, training=False)
+        sample_rate = 16000
+
+        audio_both = tf.concat(
+            [
+                outputs["audio_synth"][:1],
+                outputs["audio"][:1],
+            ],
+            axis=1,
+        )
+
+        ddsp.training.summaries.audio_summary(
+            audio_both, step=i, sample_rate=sample_rate, name="timbre_transfer"
+        )
+
+        logging.info(f"Predicted sample {i+1}")
+
+        # if i == 80:
+        #     break

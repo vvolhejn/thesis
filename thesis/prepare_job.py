@@ -9,6 +9,8 @@ import argparse
 import datetime
 import os
 
+from thesis.util import get_today_string
+
 HEADER = r"""
 module load gcc/8.2.0
 module load python_gpu/3.8.5
@@ -19,6 +21,7 @@ source venv/bin/activate
 # Print machine info
 nvidia-smi
 lscpu
+hostnamectl
 
 """
 
@@ -106,10 +109,7 @@ def create_job_dir(base_dir, name, gin_file):
     assert gin_file.endswith(".gin")
     gin_file = gin_file[: -len(".gin")]
 
-    today = datetime.date.today()
-    date_s = today.strftime("%m%d")
-
-    res = f"{date_s}-{gin_file}"
+    res = f"{get_today_string()}-{gin_file}"
     if name:
         res += f"-{name}"
 
