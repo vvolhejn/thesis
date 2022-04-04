@@ -139,7 +139,7 @@ class ScalingLayer(tf.keras.layers.Layer):
         return inputs * self.scale
 
 
-class NEWTTrainableWaveshapers(tf.keras.Sequential):
+class TrainableWaveshapers(tf.keras.Sequential):
     """
     Stack Dense -> LayerNorm -> Leaky ReLU layers.
     Like the FcStack class from DDSP, but has an output layer with a different size
@@ -156,6 +156,7 @@ class NEWTTrainableWaveshapers(tf.keras.Sequential):
         **kwargs
     ):
         super().__init__()
+        self.n_waveshapers = n_waveshapers
 
         assert layers >= 2, "Depth must be at least 2"
 
@@ -191,6 +192,72 @@ class NEWTTrainableWaveshapers(tf.keras.Sequential):
         super().__init__(layers_list, **kwargs)
 
 
+class CachedWaveshapers(tf.keras.layers.Layer):
+    def __init__(
+        self,
+        waveshapers: TrainableWaveshapers,
+        min_value=-3,
+        max_value=3,
+        n_buckets=4096,
+    ):
+        """
+        Precomputes the values of a `TranableWaveshapers` instance and returns a linear
+        interpolation when called.
+        """
+        super().__init__()
+
+        self.min_value = min_value
+        self.max_value = max_value
+        self.n_buckets = n_buckets
+        self.n_waveshapers = waveshapers.n_waveshapers
+
+        x = tf.linspace(min_value, max_value, n_buckets)
+        x = einops.repeat(
+            x,
+            "n_samples -> 1 n_samples n_waveshapers",
+            n_waveshapers=waveshapers.n_waveshapers,
+        )
+        self.lookup_table = waveshapers(x)[0]
+
+    def lookup(self, indices):
+        tf.ensure_shape(indices, [None, None, self.n_waveshapers])
+
+        # The indices we need to know which waveshaper we want for each value.
+        waveshaper_indices = einops.repeat(
+            tf.range(self.n_waveshapers),
+            "n_waveshapers -> b t n_waveshapers",
+            b=indices.shape[0],
+            t=indices.shape[1],
+        )
+        indices = tf.stack([indices, waveshaper_indices], axis=-1)
+
+        return tf.gather_nd(params=self.lookup_table, indices=indices)
+
+    def call(self, inputs):
+        tf.ensure_shape(inputs, [None, None, self.n_waveshapers])
+        indices_continuous = (
+            (self.n_buckets - 1)
+            * (inputs - self.min_value)
+            / (self.max_value - self.min_value)
+        )
+
+        indices_lower = tf.clip_by_value(
+            tf.floor(indices_continuous).astype(tf.int32), 0, self.n_buckets - 1
+        )
+        indices_upper = tf.clip_by_value(
+            tf.floor(indices_continuous).astype(tf.int32) + 1, 0, self.n_buckets - 1
+        )
+
+        values_lower = self.lookup(indices_lower)
+        values_upper = self.lookup(indices_upper)
+
+        upper_fraction = indices_continuous - indices_lower
+
+        # Do linear interpolation. Beyond the bounds of the lookup table,
+        # the min/max value is returned.
+        return values_lower + (values_upper - values_lower) * upper_fraction
+
+
 @gin.configurable
 class NEWTWaveshaper(ddsp.processors.Processor):
     """
@@ -217,23 +284,12 @@ class NEWTWaveshaper(ddsp.processors.Processor):
             trainable=True,
         )
 
-        # self.shaping_fn = NEWTFcStack(
-        #     hidden_size=shaping_fn_hidden_size,
-        #     out_size=1,
-        #     nonlinearity=tf.sin,
-        #     out_nonlinearity=tf.sin,
-        #     layer_norm=False,
-        #     out_layer_norm=False,
-        # )
-        self.shaping_fn = NEWTTrainableWaveshapers(
+        self.shaping_fn = TrainableWaveshapers(
             n_waveshapers=n_waveshapers, hidden_size=shaping_fn_hidden_size
         )
 
         self.mixer = tfkl.Dense(1)
         self.lookup_table = None
-
-    def precompute(self):
-        pass
 
     def get_controls(self, exciter, control_embedding):
         return {"exciter": exciter, "control_embedding": control_embedding}

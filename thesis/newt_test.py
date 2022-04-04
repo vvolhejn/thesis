@@ -84,3 +84,57 @@ class NEWTWaveshaperTest(tf.test.TestCase):
             unmixed_output[1, :, 0],
             msg="The output for different batches should be the same.",
         )
+
+
+class CachedWaveshapersTest(tf.test.TestCase):
+    def test_matches_original_values(self):
+        n_waveshapers = 3
+        max_value = 3
+        n_samples = 100
+        batch_size = 2
+
+        waveshapers = newt.TrainableWaveshapers(n_waveshapers=n_waveshapers)
+
+        cached_waveshapers = newt.CachedWaveshapers(
+            waveshapers, min_value=-max_value, max_value=max_value
+        )
+
+        exciter = tf.linspace(-max_value, max_value, n_samples)
+        exciter = einops.repeat(
+            exciter,
+            "x -> b x n_waveshapers",
+            n_waveshapers=n_waveshapers,
+            b=batch_size,
+        )
+
+        true_values = waveshapers(exciter)
+        cached_values = cached_waveshapers(exciter)
+
+        # Checks that absolute(a - b) <= (atol + rtol * absolute(b))
+        self.assertAllClose(
+            true_values,
+            cached_values,
+            atol=1e-5,
+            msg="Cached values do not match the original",
+        )
+
+        # Check behavior for out-of-bounds elements.
+        exciter_oob = tf.convert_to_tensor(
+            [-max_value - 1, -max_value, max_value, max_value + 1]
+        )
+        exciter_oob = einops.repeat(
+            exciter_oob, "x -> 1 x n_waveshapers", n_waveshapers=n_waveshapers
+        )
+
+        oob_values = cached_waveshapers(exciter_oob)
+
+        self.assertAllClose(
+            oob_values[0, 0, :],
+            oob_values[0, 1, :],
+            msg="Beyond the cached bounds, should return the value at the border (lower)",
+        )
+        self.assertAllClose(
+            oob_values[0, 2, :],
+            oob_values[0, 3, :],
+            msg="Beyond the cached bounds, should return the value at the border (upper)",
+        )
