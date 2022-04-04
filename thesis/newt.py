@@ -126,6 +126,71 @@ class NEWTFcStack(tf.keras.Sequential):
         super().__init__(layers_list, **kwargs)
 
 
+class ScalingLayer(tf.keras.layers.Layer):
+    def __init__(self, n_waveshapers, stddev=10):
+        super().__init__()
+        self.stddev = stddev
+        self.scale = tf.Variable(
+            tf.random.normal(shape=[1, 1, n_waveshapers], stddev=stddev),
+            trainable=True,
+        )
+
+    def call(self, inputs):
+        return inputs * self.scale
+
+
+class NEWTTrainableWaveshapers(tf.keras.Sequential):
+    """
+    Stack Dense -> LayerNorm -> Leaky ReLU layers.
+    Like the FcStack class from DDSP, but has an output layer with a different size
+    and without a nonlinearity applied
+    """
+
+    def __init__(
+        self,
+        layers=2,
+        hidden_size=8,
+        n_waveshapers=64,
+        nonlinearity=tf.sin,
+        out_nonlinearity=tf.sin,
+        **kwargs
+    ):
+        super().__init__()
+
+        assert layers >= 2, "Depth must be at least 2"
+
+        layers_list = [
+            # tfkl.Lambda(lambda x: x * self.input_scale)
+            ScalingLayer(n_waveshapers)
+        ]
+
+        for i in range(layers):
+
+            if i < layers - 1:
+                filters = n_waveshapers * hidden_size
+                cur_nonlinearity = nonlinearity
+            else:
+                filters = n_waveshapers
+                cur_nonlinearity = out_nonlinearity
+
+            layers_list.append(
+                tfkl.Conv1D(
+                    filters=filters,
+                    kernel_size=1,
+                    padding="same",
+                    groups=n_waveshapers,
+                    use_bias=True,
+                )
+            )
+
+            layers_list.append(
+                tfkl.Activation(ddsp.training.nn.get_nonlinearity(cur_nonlinearity))
+            )
+            # TODO: test if this works
+
+        super().__init__(layers_list, **kwargs)
+
+
 @gin.configurable
 class NEWTWaveshaper(ddsp.processors.Processor):
     """
@@ -136,7 +201,7 @@ class NEWTWaveshaper(ddsp.processors.Processor):
         self,
         n_waveshapers: int,
         control_embedding_size: int,
-        shaping_fn_hidden_size: int = 16,
+        shaping_fn_hidden_size: int = 8,
         name="newt_waveshaper",
     ):
         super().__init__(name=name)
@@ -152,16 +217,23 @@ class NEWTWaveshaper(ddsp.processors.Processor):
             trainable=True,
         )
 
-        self.shaping_fn = NEWTFcStack(
-            hidden_size=shaping_fn_hidden_size,
-            out_size=1,
-            nonlinearity=tf.sin,
-            out_nonlinearity=tf.sin,
-            layer_norm=False,
-            out_layer_norm=False,
+        # self.shaping_fn = NEWTFcStack(
+        #     hidden_size=shaping_fn_hidden_size,
+        #     out_size=1,
+        #     nonlinearity=tf.sin,
+        #     out_nonlinearity=tf.sin,
+        #     layer_norm=False,
+        #     out_layer_norm=False,
+        # )
+        self.shaping_fn = NEWTTrainableWaveshapers(
+            n_waveshapers=n_waveshapers, hidden_size=shaping_fn_hidden_size
         )
 
         self.mixer = tfkl.Dense(1)
+        self.lookup_table = None
+
+    def precompute(self):
+        pass
 
     def get_controls(self, exciter, control_embedding):
         return {"exciter": exciter, "control_embedding": control_embedding}
@@ -191,18 +263,9 @@ class NEWTWaveshaper(ddsp.processors.Processor):
 
         x = exciter * gamma_index + beta_index
 
-        # We add an axis so that [b, t, waveshaper] all act as batch dimensions
-        # and we apply a function f: R->R to each element separately
-        x = einops.rearrange(x, "b t waveshaper -> b t waveshaper 1")
         x = self.shaping_fn(x)
 
-        tf.debugging.assert_shapes(
-            [
-                (exciter, ("batch_size", "n_samples", "n_waveshapers")),
-                (x, ("batch_size", "n_samples", "n_waveshapers", "1")),
-            ]
-        )
-        x = einops.rearrange(x, "b t waveshaper 1 -> b t waveshaper")
+        tf.ensure_shape(x, exciter.shape)
 
         x = x * gamma_norm + beta_norm
 

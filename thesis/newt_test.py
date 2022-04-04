@@ -1,3 +1,4 @@
+import einops
 import tensorflow as tf
 
 from thesis import newt
@@ -56,3 +57,30 @@ class NEWTWaveshaperTest(tf.test.TestCase):
         output = shaper(exciter, control)
 
         self.assertAllEqual([batch_size, n_samples], output.shape.as_list())
+
+        n_samples2 = 100
+        exciter2 = tf.linspace(-5, 5, n_samples2)
+        exciter2 = einops.repeat(
+            exciter2,
+            "x -> b x n_waveshapers",
+            n_waveshapers=shaper.n_waveshapers,
+            b=batch_size,
+        )
+        unmixed_output = shaper.shaping_fn(exciter2)
+
+        self.assertAllEqual(
+            [batch_size, n_samples2, shaper.n_waveshapers],
+            unmixed_output.shape.as_list(),
+        )
+
+        self.assertNotAllClose(
+            unmixed_output[0, :, 0],
+            unmixed_output[0, :, 1],
+            msg="The output for different waveshapers should be different.",
+        )
+
+        self.assertAllClose(
+            unmixed_output[0, :, 0],
+            unmixed_output[1, :, 0],
+            msg="The output for different batches should be the same.",
+        )
