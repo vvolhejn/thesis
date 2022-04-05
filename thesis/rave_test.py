@@ -1,6 +1,6 @@
 import tensorflow as tf
 
-from thesis import rave, pqmf
+from thesis import rave, pqmf, vae
 
 
 class FilteredNoiseTest(tf.test.TestCase):
@@ -8,7 +8,7 @@ class FilteredNoiseTest(tf.test.TestCase):
         n_layers = 3
         downsample_per_layer = 2
         n_bands = 8
-        n_filter_banks = 4
+        n_noise_bands = 4
         batch_size = 2
         n_samples = 16000
         embedding_size = 32
@@ -18,19 +18,20 @@ class FilteredNoiseTest(tf.test.TestCase):
             n_layers=n_layers,
             downsample_per_layer=downsample_per_layer,
             n_bands=n_bands,
-            n_filter_banks=n_filter_banks,
+            n_noise_bands=n_noise_bands,
         )
 
         x = tf.random.normal((batch_size, n_samples, embedding_size))
         y = net(x)
 
         self.assertEqual(
-            y.shape.as_list(),
             [
                 batch_size,
-                n_samples // (downsample_per_layer**n_layers),
-                n_bands * n_filter_banks,
+                n_samples // (downsample_per_layer ** n_layers),
+                n_noise_bands,
+                n_bands,
             ],
+            y.shape.as_list(),
         )
 
 
@@ -88,10 +89,10 @@ class VAETest(tf.test.TestCase):
             ratios=[4, 2],
         )
 
-        model = rave.VariationalAutoencoder(preprocessor=preprocessor, encoder=encoder)
+        model = vae.VariationalAutoencoder(preprocessor=preprocessor, encoder=encoder)
 
         # Single-band audio because we want the PQMF preprocessor to analyze the signal
-        x = tf.random.normal((batch_size, n_samples, 1))
+        x = tf.random.normal((batch_size, n_samples))
 
         features = model.encode({"audio": x})
         z1 = features["z"]

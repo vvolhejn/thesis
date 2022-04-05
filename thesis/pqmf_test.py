@@ -1,3 +1,5 @@
+import os
+
 import einops
 import tensorflow as tf
 from ddsp.losses import SpectralLoss
@@ -13,7 +15,9 @@ def get_loss(target_audio, audio):
 
 
 def get_audio_fixture():
-    input_f = open("../fixtures/violin_1s.wav", "rb")
+    input_f = open(
+        os.path.join(os.path.dirname(__file__), "../fixtures/violin_1s.wav"), "rb"
+    )
     wav_bytes = input_f.read()
     audio = audio_bytes_to_np(wav_bytes)
     return audio
