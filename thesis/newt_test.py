@@ -93,9 +93,9 @@ class CachedWaveshapersTest(tf.test.TestCase):
         n_samples = 100
         batch_size = 2
 
-        waveshapers = newt.TrainableWaveshapers(n_waveshapers=n_waveshapers)
+        waveshapers = newt.TrainableShapingFunctions(n_waveshapers=n_waveshapers)
 
-        cached_waveshapers = newt.CachedWaveshapers(
+        cached_waveshapers = newt.CachedShapingFunctions(
             waveshapers, min_value=-max_value, max_value=max_value
         )
 

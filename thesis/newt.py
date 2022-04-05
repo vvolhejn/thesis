@@ -139,7 +139,7 @@ class ScalingLayer(tf.keras.layers.Layer):
         return inputs * self.scale
 
 
-class TrainableWaveshapers(tf.keras.Sequential):
+class TrainableShapingFunctions(tf.keras.Sequential):
     """
     Stack Dense -> LayerNorm -> Leaky ReLU layers.
     Like the FcStack class from DDSP, but has an output layer with a different size
@@ -192,10 +192,10 @@ class TrainableWaveshapers(tf.keras.Sequential):
         super().__init__(layers_list, **kwargs)
 
 
-class CachedWaveshapers(tf.keras.layers.Layer):
+class CachedShapingFunctions(tf.keras.layers.Layer):
     def __init__(
         self,
-        waveshapers: TrainableWaveshapers,
+        waveshapers: TrainableShapingFunctions,
         min_value=-3,
         max_value=3,
         n_buckets=4096,
@@ -284,12 +284,17 @@ class NEWTWaveshaper(ddsp.processors.Processor):
             trainable=True,
         )
 
-        self.shaping_fn = TrainableWaveshapers(
+        self.shaping_fn = TrainableShapingFunctions(
             n_waveshapers=n_waveshapers, hidden_size=shaping_fn_hidden_size
         )
 
+        self.cached_shaping_fn = None
+
         self.mixer = tfkl.Dense(1)
         self.lookup_table = None
+
+    def cache_shaping_fn(self):
+        self.cached_shaping_fn = CachedShapingFunctions(self.shaping_fn)
 
     def get_controls(self, exciter, control_embedding):
         return {"exciter": exciter, "control_embedding": control_embedding}
@@ -319,7 +324,10 @@ class NEWTWaveshaper(ddsp.processors.Processor):
 
         x = exciter * gamma_index + beta_index
 
-        x = self.shaping_fn(x)
+        if self.cached_shaping_fn:
+            x = self.cached_shaping_fn(x)
+        else:
+            x = self.shaping_fn(x)
 
         tf.ensure_shape(x, exciter.shape)
 
