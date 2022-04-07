@@ -20,8 +20,8 @@ source venv/bin/activate
 
 # Print machine info
 nvidia-smi
-lscpu
-hostnamectl
+#lscpu
+#hostnamectl
 
 """
 

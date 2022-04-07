@@ -157,21 +157,20 @@ def evaluate_or_sample_batch(
     mode,
     evaluate_and_sample,
     step,
-    compute_f0=True,
 ):
     if isinstance(data_provider, data.SyntheticNotes):
         batch["audio"] = model.generate_synthetic_audio(batch)
         batch["f0_confidence"] = tf.ones_like(batch["f0_hz"])[:, :, 0]
         batch["loudness_db"] = ddsp.spectral_ops.compute_loudness(batch["audio"])
 
-    # Delete the original keys to be sure we're not using them.
-    del batch["f0_hz"]
-    del batch["f0_confidence"]
-
-    # Some models might not need to compute f0.
-    if compute_f0:
-        with Timer("Autoencoder.CREPE", logger=None):
-            recompute_f0(batch)
+    # Delete the original keys to be sure we're computing them here. This is so that
+    # pitch estimation is included in the timing information.
+    # `F0LoudnessPreprocessor.compute_f0` needs to be set to True in Gin for models
+    # that use pitch info to work.
+    # The configurable `compute_f0` can be used to select the CREPE model size
+    # and other parameters.
+    batch["f0_hz"] = None
+    batch["f0_confidence"] = None
 
     with Timer("Autoencoder", logger=None):
         outputs, losses = model(batch, return_losses=True, training=False)
@@ -208,35 +207,6 @@ def log_timing_info(dataset, sample_rate):
                 table, "model_part", "mean", title="Time distribution"
             ),
             "time_hierarchy": time_hierarchy_plot,
-        }
-    )
-
-
-@gin.configurable
-def recompute_f0(
-    batch, frame_rate=250, padding="same", viterbi=True, crepe_model="full"
-):
-    """
-    The f0 signal is precomputed for the dataset, but we want to include the time
-    it takes for CREPE to estimate the f0.
-
-    Padding can be "same" or "center", see ddsp_prepare_tfrecord.py
-    """
-
-    assert len(batch["audio"]) == 1, 'The "batch" must have size 1 for recomputing f0.'
-
-    f0_hz, f0_confidence = ddsp.spectral_ops.compute_f0(
-        batch["audio"][0],
-        frame_rate,
-        viterbi=viterbi,
-        padding=padding,
-        crepe_model=crepe_model,
-    )
-
-    batch.update(
-        {
-            "f0_hz": f0_hz.astype(np.float32),
-            "f0_confidence": f0_confidence.astype(np.float32),
         }
     )
 
