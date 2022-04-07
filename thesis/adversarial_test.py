@@ -1,13 +1,13 @@
 import tensorflow as tf
 
-from thesis import gan
+from thesis import adversarial
 
 
 class SingleDiscriminatorTest(tf.test.TestCase):
     def test_output_shape_is_correct(self):
-        dis = gan.Discriminator()
+        dis = adversarial.Discriminator()
         batch_size = 2
-        n_samples = 1000
+        n_samples = 16000
 
         batch = tf.random.normal((batch_size, n_samples, 1))
         features = dis(batch)
@@ -23,9 +23,9 @@ class SingleDiscriminatorTest(tf.test.TestCase):
 class MultiScaleDiscriminatorTest(tf.test.TestCase):
     def test_output_shape_is_correct(self):
         n = 3
-        multi_dis = gan.MultiScaleDiscriminators(n=n)
+        multi_dis = adversarial.MultiScaleDiscriminators(n=n)
         batch_size = 2
-        n_samples = 1000
+        n_samples = 64000
 
         batch = tf.random.normal((batch_size, n_samples, 1))
         multiscale_features = multi_dis(batch)
@@ -41,14 +41,14 @@ class MultiScaleDiscriminatorTest(tf.test.TestCase):
 class DiscriminatorStepTest(tf.test.TestCase):
     def test_output_is_correct(self):
         n = 3
-        multi_dis = gan.MultiScaleDiscriminators(n=n)
+        multi_dis = adversarial.MultiScaleDiscriminators(n=n)
         batch_size = 2
         n_samples = 1000
 
         batch_real = tf.random.normal((batch_size, n_samples, 1))
         batch_fake = tf.random.normal((batch_size, n_samples, 1))
 
-        out = gan.discriminator_step(multi_dis, batch_real, batch_fake)
+        out = adversarial.discriminator_step(multi_dis, batch_real, batch_fake)
 
         keys = [
             "loss_gen",

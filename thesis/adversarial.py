@@ -1,14 +1,17 @@
 """ Based on RAVE, which in turn is based on MelGAN, based on conditional GANs... """
-
+import einops
+import gin
 import tensorflow as tf
 import tensorflow_addons as tfa
 import tensorflow.keras.layers as tfkl
+
+import ddsp.training
 
 
 class Discriminator(tf.keras.Model):
 
     # Default params are from RAVE
-    def __init__(self, capacity=16, multiplier=4, n_layers=4):
+    def __init__(self, capacity=16, multiplier=2, n_layers=4):
         super().__init__()
 
         layers = [
@@ -24,26 +27,26 @@ class Discriminator(tf.keras.Model):
 
         for i in range(n_layers):
             layers.append(
-                tfa.layers.WeightNormalization(
-                    tfkl.Conv1D(
-                        filters=min(1024, capacity * multiplier ** (i + 1)),
-                        kernel_size=41,
-                        strides=multiplier,
-                        padding="same",
-                        groups=multiplier ** (i + 1),
-                    )
+                # tfa.layers.WeightNormalization(
+                tfkl.Conv1D(
+                    filters=min(1024, capacity * multiplier ** (i + 1)),
+                    kernel_size=41,
+                    strides=multiplier,
+                    padding="same",
+                    # groups=multiplier ** (i + 1),
                 )
+                # )
             )
             layers.append(tfkl.Activation(tf.nn.leaky_relu))
 
         layers.append(
-            tfa.layers.WeightNormalization(
-                tfkl.Conv1D(
-                    filters=min(1024, capacity * multiplier ** (i + 1)),
-                    kernel_size=5,
-                    padding="same",
-                )
+            # tfa.layers.WeightNormalization(
+            tfkl.Conv1D(
+                filters=min(1024, capacity * multiplier**n_layers),
+                kernel_size=5,
+                padding="same",
             )
+            # )
         )
 
         layers.append(tfkl.Activation(tf.nn.leaky_relu))
@@ -72,6 +75,10 @@ class Discriminator(tf.keras.Model):
         x = inputs
 
         for layer in self.net:
+            tf.print(x.shape, layer, layer.name)
+            # if isinstance(layer, tfkl.Conv1D):
+            # print(layer.filters, layer.groups)
+
             x = layer(x)
 
             # The conv layers are wrapped in weight norm.
@@ -182,3 +189,43 @@ def get_adversarial_loss(score_real, score_fake, loss_mode="hinge"):
     else:
         raise NotImplementedError
     return loss_gen, loss_dis
+
+
+@gin.configurable
+class AdversarialAutoencoder(ddsp.training.models.Autoencoder):
+    """
+    A version of Autoencoder that also supports adversarial training (can be disabled).
+    """
+
+    def __init__(self, adversarial_training=True, **kwargs):
+        super().__init__(**kwargs)
+
+        self.adversarial_training = adversarial_training
+        if adversarial_training:
+            self.discriminators = MultiScaleDiscriminators(n=3)
+
+    def call(self, features, training=False):
+        outputs = super().call(features, training)
+
+        # TODO: only train from a certain step
+        # TODO: freeze encoder
+        if training and self.adversarial_training:
+            dis_info = discriminator_step(
+                self.discriminators,
+                x_real=einops.rearrange(outputs["audio"], "b t -> b t 1"),
+                x_fake=einops.rearrange(
+                    self.get_audio_from_outputs(outputs), "b t -> b t 1"
+                ),
+            )
+
+            self._losses_dict.update(
+                {
+                    "adv_loss_gen": dis_info["loss_gen"],
+                    "adv_loss_dis": dis_info["loss_dis"],
+                    "loss_feature_matching": dis_info["loss_feature_matching"],
+                }
+            )
+
+        tf.print(self._losses_dict)
+
+        return outputs

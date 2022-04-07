@@ -7,7 +7,7 @@ import thesis.util
 
 DilatedConvDecoder:
     stacks = 4
-    resample_stride = 2
+    resample_stride = 2 # This can't be more - it would make the samples longer than they were originally
 
 # No noise generator.
 ProcessorGroup.dag = [

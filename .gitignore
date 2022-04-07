@@ -3,6 +3,7 @@ data/
 .ipynb_checkpoints/
 *.egg-info/
 .pytest_cache/
+wandb/
 
 # Tensorboard logs
 logdir/
