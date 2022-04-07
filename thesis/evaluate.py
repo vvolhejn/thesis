@@ -32,7 +32,7 @@ def nas_evaluate(
     save_dir="/tmp/ddsp.gin/training",
     restore_dir="",
     batch_size=1,
-    num_batches=1,
+    num_batches=100,
     evaluate_and_sample=False,
 ):
     """Run evaluation.
@@ -61,6 +61,11 @@ def nas_evaluate(
     summary_writer = tf.summary.create_file_writer(summary_dir)
 
     checkpoint_path = tf.train.latest_checkpoint(restore_dir, latest_filename=None)
+    # checkpoint_path = (
+    #     "/Users/vaclav/prog/thesis/data/models/0323-halfrave-1/ckpt-100000"
+    # )
+
+    assert checkpoint_path is not None
     # Get the dataset.
     dataset = data_provider.get_batch(batch_size=batch_size, shuffle=False, repeats=-1)
     # Set number of batches.
@@ -143,15 +148,30 @@ def nas_evaluate(
     return latest_losses
 
 
+@gin.configurable
 def evaluate_or_sample_batch(
-    model, data_provider, batch, evaluators, mode, evaluate_and_sample, step
+    model,
+    data_provider,
+    batch,
+    evaluators,
+    mode,
+    evaluate_and_sample,
+    step,
+    compute_f0=True,
 ):
     if isinstance(data_provider, data.SyntheticNotes):
         batch["audio"] = model.generate_synthetic_audio(batch)
         batch["f0_confidence"] = tf.ones_like(batch["f0_hz"])[:, :, 0]
         batch["loudness_db"] = ddsp.spectral_ops.compute_loudness(batch["audio"])
 
-    # TODO: Find a way to add losses with training=False.
+    # Delete the original keys to be sure we're not using them.
+    del batch["f0_hz"]
+    del batch["f0_confidence"]
+
+    # Some models might not need to compute f0.
+    if compute_f0:
+        with Timer("Autoencoder.CREPE", logger=None):
+            recompute_f0(batch)
 
     with Timer("Autoencoder", logger=None):
         outputs, losses = model(batch, return_losses=True, training=False)
@@ -188,6 +208,35 @@ def log_timing_info(dataset, sample_rate):
                 table, "model_part", "mean", title="Time distribution"
             ),
             "time_hierarchy": time_hierarchy_plot,
+        }
+    )
+
+
+@gin.configurable
+def recompute_f0(
+    batch, frame_rate=250, padding="same", viterbi=True, crepe_model="full"
+):
+    """
+    The f0 signal is precomputed for the dataset, but we want to include the time
+    it takes for CREPE to estimate the f0.
+
+    Padding can be "same" or "center", see ddsp_prepare_tfrecord.py
+    """
+
+    assert len(batch["audio"]) == 1, 'The "batch" must have size 1 for recomputing f0.'
+
+    f0_hz, f0_confidence = ddsp.spectral_ops.compute_f0(
+        batch["audio"][0],
+        frame_rate,
+        viterbi=viterbi,
+        padding=padding,
+        crepe_model=crepe_model,
+    )
+
+    batch.update(
+        {
+            "f0_hz": f0_hz.astype(np.float32),
+            "f0_confidence": f0_confidence.astype(np.float32),
         }
     )
 
@@ -239,7 +288,7 @@ def sample_timbre_transfer(model):
             f" to {max_loudness_after:.2f}."
         )
 
-        if batch['mask_on'].mean() < 0.5:
+        if batch["mask_on"].mean() < 0.5:
             # An mostly silent segment.
             # A completely silent one can be detected by `batch["loudness_db"].max() == -80`
             continue
