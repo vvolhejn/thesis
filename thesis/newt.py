@@ -1,5 +1,6 @@
 import math
 
+from absl import logging
 import gin
 import tensorflow as tf
 import ddsp
@@ -112,7 +113,7 @@ class NEWTFcStack(tf.keras.Sequential):
         out_nonlinearity=tf.identity,
         layer_norm=True,
         out_layer_norm=False,
-        **kwargs
+        **kwargs,
     ):
         assert layers >= 2, "Depth must be at least 2"
 
@@ -153,7 +154,7 @@ class TrainableShapingFunctions(tf.keras.Sequential):
         n_waveshapers=64,
         nonlinearity=tf.sin,
         out_nonlinearity=tf.sin,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
         self.n_waveshapers = n_waveshapers
@@ -348,3 +349,21 @@ def summarize_newt(outputs, step):
     ddsp.training.summaries.spectrogram_array_summary(
         audios_with_labels, name="spectrograms", step=step
     )
+
+
+def cache_waveshapers_if_possible(model):
+    """
+    If `model` has a NEWTWaveshaper in its processor group, cache its outputs
+    to improve performance.
+    """
+
+    found = False
+
+    for i, processor in enumerate(model.processor_group.processors):
+        if isinstance(processor, NEWTWaveshaper):
+            processor.cache_shaping_fn()
+            found = True
+            logging.info(f"Cached NEWTWaveshaper at index {i}")
+
+    if not found:
+        logging.info("No NEWTWaveshapers in model - not caching anything.")

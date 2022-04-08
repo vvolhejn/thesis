@@ -9,8 +9,6 @@ import argparse
 import datetime
 import os
 
-from thesis.util import get_today_string
-
 HEADER = r"""
 module load gcc/8.2.0
 module load python_gpu/3.8.5
@@ -45,7 +43,18 @@ nas_run \
 DEFAULT_GIN_PARAMS = {
     "batch_size": "8",
     "trainers.Trainer.checkpoints_to_keep": "5",
+    # For evaluation
+    "compute_f0.crepe_model": "'tiny'",
+    "F0LoudnessPreprocessor.compute_f0": True,
 }
+
+
+# This function is also in `util` but that module imports TensorFlow, which is slow
+def get_today_string():
+    """0331, 0611 etc."""
+    today = datetime.date.today()
+    date_s = today.strftime("%m%d")
+    return date_s
 
 
 class ParseGinParams(argparse.Action):

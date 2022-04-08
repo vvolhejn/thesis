@@ -16,6 +16,7 @@ import pkg_resources
 import tensorflow as tf
 
 from thesis import evaluate
+from thesis.util import get_today_string
 
 gfile = tf.io.gfile
 FLAGS = flags.FLAGS
@@ -82,6 +83,13 @@ flags.DEFINE_multi_string(
 flags.DEFINE_boolean("run_once", False, "Whether evaluation will run once.")
 flags.DEFINE_integer(
     "initial_delay_secs", None, "Time to wait before evaluation starts"
+)
+
+# W&B flags
+flags.DEFINE_string(
+    "wandb_group",
+    get_today_string(),
+    "An identifier that can be used in W&B to group runs.",
 )
 
 # GIN_PATH = pkg_resources.resource_filename(__name__, "gin")
@@ -201,6 +209,7 @@ def main(unused_argv):
             mode=FLAGS.mode,
             save_dir=save_dir,
             restore_dir=restore_dir,
+            flag_values_dict=FLAGS.flag_values_dict(),
         )
 
 
