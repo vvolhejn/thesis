@@ -44,7 +44,7 @@ DEFAULT_GIN_PARAMS = {
     "batch_size": "8",
     "trainers.Trainer.checkpoints_to_keep": "5",
     # For evaluation
-    "compute_f0.crepe_model": "'tiny'",
+    "compute_f0.model_name": "'spice-v2'",  # "'crepe-tiny'"
     "F0LoudnessPreprocessor.compute_f0": True,
 }
 

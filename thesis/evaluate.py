@@ -21,19 +21,21 @@ import numpy as np
 # ---------------------- Evaluation --------------------------------------------
 from thesis.timbre_transfer_util import adjust_batch, load_dataset_statistics
 from thesis.util import get_today_string
-
+import thesis.newt
 
 @gin.configurable
 def nas_evaluate(
     data_provider,
-    model,
+    model: ddsp.training.models.Autoencoder,
     evaluator_classes=None,
     mode="eval",
     save_dir="/tmp/ddsp.gin/training",
     restore_dir="",
     batch_size=1,
-    num_batches=100,
+    num_batches=2,
     evaluate_and_sample=False,
+    flag_values_dict=None,
+    cache_newt_waveshapers=True,
 ):
     """Run evaluation.
 
@@ -65,7 +67,7 @@ def nas_evaluate(
     #     "/Users/vaclav/prog/thesis/data/models/0323-halfrave-1/ckpt-100000"
     # )
 
-    assert checkpoint_path is not None
+    assert checkpoint_path is not None, f"No checkpoint found in {restore_dir}"
     # Get the dataset.
     dataset = data_provider.get_batch(batch_size=batch_size, shuffle=False, repeats=-1)
     # Set number of batches.
@@ -91,7 +93,7 @@ def nas_evaluate(
         entity="neural-audio-synthesis-thesis",
         name=f"{get_today_string()}-eval-{os.path.basename(save_dir)}",
         sync_tensorboard=True,
-        # config=flag_values_dict,
+        config=flag_values_dict,
         dir="/cluster/scratch/vvolhejn/wandb",
         tags=["eval"],
     )
@@ -110,6 +112,11 @@ def nas_evaluate(
                 "No existing checkpoint found in %s, skipping " "checkpoint loading.",
                 restore_dir,
             )
+
+        if cache_newt_waveshapers:
+            thesis.newt.cache_waveshapers_if_possible(model)
+        else:
+            logging.info("Caching of NEWT waveshapers is disabled.")
 
         for batch_idx in range(1, num_batches + 1):
             logging.info("Predicting batch %d of size %d", batch_idx, batch_size)
