@@ -159,13 +159,11 @@ class PQMFBank(tf.keras.layers.Layer):
         """
         tf.ensure_shape(x, [None, None, 1])
 
-        if self.n_bands == 1:
-            return x
+        x = einops.rearrange(x, "b (t m) c -> b t (c m)", m=self.n_bands)
+        hk = einops.rearrange(self.hk, "(t m) 1 c -> t m c", m=self.n_bands)
 
-        x = tf.nn.conv1d(x, self.hk, stride=self.hk.shape[2], padding="SAME")
-        x = reverse_half(x)
+        x = tf.nn.conv1d(x, hk, stride=1, padding="SAME")
 
-        tf.ensure_shape(x, [None, None, self.n_bands])
         return x
 
     def synthesis(self, x):
@@ -181,35 +179,20 @@ class PQMFBank(tf.keras.layers.Layer):
         if self.n_bands == 1:
             return x
 
-        x = reverse_half(x)
+        hk = tf.reverse(self.hk, [0])
 
-        # First, upsample x to the original n_samples by adding zeroes so that each value
-        # in `x` is `n_bands` positions apart, e.g. for n_bands=4 we'd have
-        # x[i,:,j] <- [x[i,0,j] 0 0 0 x[i,1,j] 0 0 0...]
-        x = tf.nn.conv1d_transpose(
-            x,
-            self.updown_filter * self.n_bands,
-            strides=self.n_bands,
-            output_shape=(
-                tf.shape(x)[0],
-                tf.shape(x)[1] * self.n_bands,
-                self.n_bands,
-            ),
-        )
+        # Notice that the last two dimensions (input and output channels)
+        # are swapped in the synthesis
+        hk = einops.rearrange(hk, "(t m) 1 c -> t c m", m=self.n_bands)
 
-        # We need to transpose since the convolution is now going
-        # from n_bands channels to one
-        hk = rearrange(self.hk, "taps 1 filters -> taps filters 1")
+        x = tf.nn.conv1d(x, hk, stride=1, padding="SAME")
 
-        hk = tf.reverse(hk, [0])
+        x = tf.reverse(x, [1])
+        x = einops.rearrange(x, "b t (c m) -> b (t m) c", m=self.n_bands) * self.n_bands
+        x = tf.reverse(x, [1])
 
-        taps = hk.shape[0]
-
-        x = tf.pad(x, [[0, 0], [taps // 2, taps // 2], [0, 0]])
-        y = tf.nn.conv1d(x, hk, stride=1, padding="VALID")[..., 1:, :]
-
-        tf.ensure_shape(y, [None, None, 1])
-        return y
+        tf.ensure_shape(x, [None, None, 1])
+        return x
 
 
 @gin.configurable

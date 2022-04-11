@@ -124,9 +124,20 @@ def polyphase_forward(x, hk, rearrange_filter=True):
         filter bank ( M x T )
     """
     x = rearrange(x, "b c (t m) -> b (c m) t", m=hk.shape[0])
+    # b t/8 8
+
     if rearrange_filter:
         hk = rearrange(hk, "c (t m) -> c m t", m=hk.shape[0])
+        # 8 taps -> 8 8 taps/8
+
     # x = nn.functional.conv1d(x, hk, padding=hk.shape[-1] // 2)[..., :-1]
+
+    # x = einops.rearrange(x, "b (t m) c -> b t (c m)", m=hk.shape[-1])
+
+    # input – input tensor of shape (minibatch,in_channels,iW)
+    # weight – filters of shape (out_channels,in_channels,kW)
+
+    # The slicing cuts of one sample at the end
     x = nn.functional.conv1d(x, hk, padding=hk.shape[-1] // 2)[..., :-1]
     return x
 
