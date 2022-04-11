@@ -27,6 +27,8 @@ COMMAND_TEMPLATE = r"""
 SAVE_DIR={base_dir}/{job_dir}
 TRAIN_TFRECORD_FILEPATTERN={dataset_pattern} 
 
+{wandb_command}
+
 nas_run \
   --mode={mode} \
   --alsologtostderr \
@@ -42,7 +44,8 @@ nas_run \
 
 DEFAULT_GIN_PARAMS = {
     "batch_size": "8",
-    "trainers.Trainer.checkpoints_to_keep": "5",
+    # "trainers.Trainer.checkpoints_to_keep": "5",
+    "checkpoints_to_keep": "5",
     # For evaluation
     "compute_f0.model_name": "'spice-v2'",  # "'crepe-tiny'"
     "F0LoudnessPreprocessor.compute_f0": True,
@@ -66,11 +69,20 @@ class ParseGinParams(argparse.Action):
 
 
 def prepare_job(
-    mode, comment, base_dir, job_dir, dataset_pattern, gin_params, mode_specific_params
+    mode,
+    comment,
+    base_dir,
+    job_dir,
+    dataset_pattern,
+    gin_params,
+    mode_specific_params,
+    use_wandb,
 ):
 
     job = f"#{comment}\n"
     job += HEADER
+
+    job += "wandb enabled\n" if use_wandb else "wandb disabled\n"
 
     job += f"SAVE_DIR={base_dir}/{job_dir}\n"
     job += f"TRAIN_TFRECORD_FILEPATTERN={dataset_pattern}\n"
@@ -136,8 +148,9 @@ def add_default_training_gin_params(gin_params, steps):
         )
 
     if "train_util.train.steps_per_save" not in gin_params:
-        # Do 100 saves during the training.
-        steps_per_save = int(gin_params["train_util.train.num_steps"]) // 100
+        # Try to do 100 saves during the training
+        # but do not save more often than once per 100 steps.
+        steps_per_save = max(int(gin_params["train_util.train.num_steps"]) // 100, 100)
         assert steps_per_save > 0
         gin_params["train_util.train.steps_per_save"] = str(steps_per_save)
 
@@ -188,6 +201,13 @@ def console_entry_point():
         action=ParseGinParams,
         help="Additional Gin parameters passed like key1=value key2=value2",
     )
+    parser.add_argument(
+        "--no-wandb",
+        help="Disable Weights and Biases for this run",
+        dest="use_wandb",
+        default=True,
+        action="store_false",
+    )
 
     args = parser.parse_args()
 
@@ -224,6 +244,7 @@ def console_entry_point():
         args.dataset,
         gin_params,
         mode_specific_params,
+        args.use_wandb,
     )
     print(job)
 

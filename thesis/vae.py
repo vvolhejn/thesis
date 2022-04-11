@@ -5,7 +5,9 @@ import tensorflow as tf
 from codetiming import Timer
 
 @gin.register
-class VariationalAutoencoder(ddsp.training.models.Autoencoder):
+class VAE(ddsp.training.models.Autoencoder):
+    """ Variational autoencoder. """
+
     def __init__(self, kl_loss_weight=1.0, **kwargs):
         super().__init__(**kwargs)
         assert self.encoder is not None

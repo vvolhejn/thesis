@@ -6,12 +6,14 @@ import tensorflow_addons as tfa
 import tensorflow.keras.layers as tfkl
 
 import ddsp.training
+from ddsp.training.trainers import Trainer
+from thesis.vae import VAE
 
 
 class Discriminator(tf.keras.Model):
 
     # Default params are from RAVE
-    def __init__(self, capacity=16, multiplier=2, n_layers=4):
+    def __init__(self, capacity=16, multiplier=4, n_layers=4):
         super().__init__()
 
         layers = [
@@ -27,26 +29,26 @@ class Discriminator(tf.keras.Model):
 
         for i in range(n_layers):
             layers.append(
-                # tfa.layers.WeightNormalization(
-                tfkl.Conv1D(
-                    filters=min(1024, capacity * multiplier ** (i + 1)),
-                    kernel_size=41,
-                    strides=multiplier,
-                    padding="same",
-                    # groups=multiplier ** (i + 1),
+                tfa.layers.WeightNormalization(
+                    tfkl.Conv1D(
+                        filters=min(1024, capacity * multiplier ** (i + 1)),
+                        kernel_size=41,
+                        strides=multiplier,
+                        padding="same",
+                        groups=multiplier ** (i + 1),
+                    )
                 )
-                # )
             )
             layers.append(tfkl.Activation(tf.nn.leaky_relu))
 
         layers.append(
-            # tfa.layers.WeightNormalization(
-            tfkl.Conv1D(
-                filters=min(1024, capacity * multiplier**n_layers),
-                kernel_size=5,
-                padding="same",
+            tfa.layers.WeightNormalization(
+                tfkl.Conv1D(
+                    filters=min(1024, capacity * multiplier**n_layers),
+                    kernel_size=5,
+                    padding="same",
+                )
             )
-            # )
         )
 
         layers.append(tfkl.Activation(tf.nn.leaky_relu))
@@ -75,7 +77,7 @@ class Discriminator(tf.keras.Model):
         x = inputs
 
         for layer in self.net:
-            tf.print(x.shape, layer, layer.name)
+            # tf.print(x.shape, layer, layer.name)
             # if isinstance(layer, tfkl.Conv1D):
             # print(layer.filters, layer.groups)
 
@@ -192,9 +194,9 @@ def get_adversarial_loss(score_real, score_fake, loss_mode="hinge"):
 
 
 @gin.configurable
-class AdversarialAutoencoder(ddsp.training.models.Autoencoder):
+class AdversarialVAE(VAE):
     """
-    A version of Autoencoder that also supports adversarial training (can be disabled).
+    A version of VAE that also supports adversarial training (can be disabled).
     """
 
     def __init__(self, adversarial_training=True, **kwargs):
@@ -204,28 +206,168 @@ class AdversarialAutoencoder(ddsp.training.models.Autoencoder):
         if adversarial_training:
             self.discriminators = MultiScaleDiscriminators(n=3)
 
-    def call(self, features, training=False):
+    def call(self, features, training=False, train_discriminator=False, warmed_up=True):
         outputs = super().call(features, training)
 
-        # TODO: only train from a certain step
-        # TODO: freeze encoder
-        if training and self.adversarial_training:
-            dis_info = discriminator_step(
-                self.discriminators,
-                x_real=einops.rearrange(outputs["audio"], "b t -> b t 1"),
-                x_fake=einops.rearrange(
-                    self.get_audio_from_outputs(outputs), "b t -> b t 1"
-                ),
-            )
+        dis_info = discriminator_step(
+            self.discriminators,
+            x_real=einops.rearrange(outputs["audio"], "b t -> b t 1"),
+            x_fake=einops.rearrange(
+                self.get_audio_from_outputs(outputs), "b t -> b t 1"
+            ),
+        )
 
+        # In every branch the update() call must have the same keys because
+        # we are in a tf.function.
+        if training and self.adversarial_training and warmed_up:
+            if train_discriminator:
+                # Train the discriminator.
+
+                self._losses_dict.update(
+                    {
+                        "adv_loss_gen": 0.0,
+                        "adv_loss_dis": dis_info["loss_dis"],
+                        "loss_feature_matching": 0.0,
+                        # We don't want the discriminator to optimize for these losses,
+                        # so remove them.
+                        "spectral_loss": 0.0,
+                        "kl_loss": 0.0,
+                    }
+                )
+            else:
+                self._losses_dict.update(
+                    {
+                        "adv_loss_gen": dis_info["loss_gen"],
+                        "adv_loss_dis": 0.0,
+                        "loss_feature_matching": dis_info["loss_feature_matching"],
+                        # (spectral_loss and kl_loss are left untouched)
+                    }
+                )
+        else:
             self._losses_dict.update(
                 {
-                    "adv_loss_gen": dis_info["loss_gen"],
-                    "adv_loss_dis": dis_info["loss_dis"],
-                    "loss_feature_matching": dis_info["loss_feature_matching"],
+                    "adv_loss_gen": 0.0,
+                    "adv_loss_dis": 0.0,
+                    "loss_feature_matching": 0.0,
                 }
             )
 
-        tf.print(self._losses_dict)
-
         return outputs
+
+
+@gin.configurable
+class AdversarialTrainer(Trainer):
+    def __init__(
+        self, model, strategy: tf.distribute.Strategy, warmup_steps=0, **kwargs
+    ):
+        super().__init__(model, strategy, **kwargs)
+        self.warmup_steps = warmup_steps
+
+    @tf.function
+    def train_step(self, inputs):
+        """Distributed training step."""
+        # Wrap iterator in tf.function, slight speedup passing in iter vs batch.
+        batch = next(inputs) if hasattr(inputs, "__next__") else inputs
+
+        train_discriminator = self.step % 2 == 1
+        warmed_up = self.step >= self.warmup_steps
+
+        # We need to have separate training functions for each if-else branch
+        # because of the limitations of distributed training and tf.function.
+        if train_discriminator and warmed_up:
+            outputs, losses = self.run(
+                self.discriminator_step_fn,
+                batch,
+            )
+        else:
+            if not warmed_up:
+                outputs, losses = self.run(self.generator_step_fn_pre_warmup, batch)
+            else:
+                outputs, losses = self.run(self.generator_step_fn_post_warmup, batch)
+
+        # Add up the scalar losses across replicas.
+        n_replicas = self.strategy.num_replicas_in_sync
+        losses_total = {
+            k: self.psum(v, axis=None) / n_replicas for k, v in losses.items()
+        }
+
+        return outputs, losses_total
+
+    @tf.function
+    def discriminator_step_fn(self, batch):
+        """Per-Replica training step for the *discriminator*."""
+        with tf.GradientTape() as tape:
+            outputs, losses = self.model(
+                batch,
+                return_losses=True,
+                training=True,
+                train_discriminator=True,
+                warmed_up=True,
+            )
+
+        dis_variables = self.model.discriminators.trainable_variables
+
+        dis_grads = tape.gradient(losses["total_loss"], dis_variables)
+        dis_grads, _ = tf.clip_by_global_norm(dis_grads, self.grad_clip_norm)
+        self.optimizer.apply_gradients(zip(dis_grads, dis_variables))
+
+        return outputs, losses
+
+    @tf.function
+    def generator_step_fn_pre_warmup(self, batch):
+        """Per-Replica training step for the *generator*."""
+        with tf.GradientTape() as tape:
+            outputs, losses = self.model(
+                batch,
+                return_losses=True,
+                training=True,
+                train_discriminator=False,
+                warmed_up=False,
+            )
+
+        gen_variables = (
+            self.model.preprocessor.trainable_variables
+            + self.model.encoder.trainable_variables
+            + self.model.decoder.trainable_variables
+            + self.model.processor_group.trainable_variables
+        )
+
+        # Clip and apply gradients.
+        gen_grads = tape.gradient(losses["total_loss"], gen_variables)
+        gen_grads, _ = tf.clip_by_global_norm(gen_grads, self.grad_clip_norm)
+        self.optimizer.apply_gradients(zip(gen_grads, gen_variables))
+
+        return outputs, losses
+
+    @tf.function
+    def generator_step_fn_post_warmup(self, batch):
+        """
+        Per-Replica training step for the *generator's decoder*. The encoder is frozen.
+
+        We have to have a separate function for this because if this were done with
+        `if`, we get:
+        "TypeError: 'gen_variables' must have the same nested structure in the main
+        and else branches."
+        """
+        with tf.GradientTape() as tape:
+            outputs, losses = self.model(
+                batch,
+                return_losses=True,
+                training=True,
+                train_discriminator=False,
+                warmed_up=True,
+            )
+
+        # Notice: the encoder's variables are not included.
+        gen_variables = (
+            self.model.preprocessor.trainable_variables
+            + self.model.decoder.trainable_variables
+            + self.model.processor_group.trainable_variables
+        )
+
+        # Clip and apply gradients.
+        gen_grads = tape.gradient(losses["total_loss"], gen_variables)
+        gen_grads, _ = tf.clip_by_global_norm(gen_grads, self.grad_clip_norm)
+        self.optimizer.apply_gradients(zip(gen_grads, gen_variables))
+
+        return outputs, losses

@@ -89,7 +89,7 @@ class VAETest(tf.test.TestCase):
             ratios=[4, 2],
         )
 
-        model = vae.VariationalAutoencoder(preprocessor=preprocessor, encoder=encoder)
+        model = vae.VAE(preprocessor=preprocessor, encoder=encoder)
 
         # Single-band audio because we want the PQMF preprocessor to analyze the signal
         x = tf.random.normal((batch_size, n_samples))
