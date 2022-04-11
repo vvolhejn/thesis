@@ -2,7 +2,7 @@
 <project version="4">
   <component name="SshConfigs">
     <configs>
-      <sshConfig authType="OPEN_SSH" host="euler.ethz.ch" id="acf0fa4a-1562-4106-ab08-902e7a1db3d5" port="22" nameFormat="DESCRIPTIVE" username="vvolhejn" useOpenSSHConfig="true" />
+      <sshConfig authType="OPEN_SSH" host="euler" id="acf0fa4a-1562-4106-ab08-902e7a1db3d5" port="22" nameFormat="DESCRIPTIVE" username="vvolhejn" useOpenSSHConfig="true" />
     </configs>
   </component>
 </project>

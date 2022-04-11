@@ -11,6 +11,7 @@
           </mappings>
           <excludedPaths>
             <excludedPath local="true" path="$PROJECT_DIR$/data" />
+            <excludedPath local="true" path="$PROJECT_DIR$/notebooks" />
           </excludedPaths>
         </serverdata>
       </paths>
