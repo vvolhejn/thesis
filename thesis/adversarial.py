@@ -360,8 +360,7 @@ class AdversarialTrainer(Trainer):
 
         # Notice: the encoder's variables are not included.
         gen_variables = (
-            self.model.preprocessor.trainable_variables
-            + self.model.decoder.trainable_variables
+            self.model.decoder.trainable_variables
             + self.model.processor_group.trainable_variables
         )
 

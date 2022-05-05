@@ -47,8 +47,7 @@ DEFAULT_GIN_PARAMS = {
     # "trainers.Trainer.checkpoints_to_keep": "5",
     "checkpoints_to_keep": "5",
     # For evaluation
-    "compute_f0.model_name": "'spice-v2'",  # "'crepe-tiny'"
-    "F0LoudnessPreprocessor.compute_f0": True,
+    # "compute_f0.model_name": "'spice-v2'",  # "'crepe-tiny'"
 }
 
 
@@ -97,6 +96,16 @@ def prepare_job(
     ]
 
     params += mode_specific_params
+
+    # Fill in the parameters for the preprocessor that decide whether a cached f0
+    # should be used (for training) or whether it should be computed anew (for inference
+    # on unseen inputs and evaluation)
+    for param_name in ["F0LoudnessPreprocessor.compute_f0", "OnlineF0PowerPreprocessor.compute_f0"]:
+        if param_name not in gin_params:
+            gin_params[param_name] = (
+                False if (mode == "train") else True
+            )
+
     params += [f'--gin_param="{k}={v}"' for (k, v) in gin_params.items()]
 
     job += " \\\n  ".join(["nas_run"] + params)
@@ -184,7 +193,7 @@ def console_entry_point():
     parser.add_argument(
         "-d",
         "--dataset",
-        default="'/cluster/home/vvolhejn/datasets/violin/violin.tfrecord*'",
+        default="'/cluster/home/vvolhejn/datasets/violin2/violin2.tfrecord-train*'",
         help="An absolute glob pattern of .tfrecord files to use",
     )
     parser.add_argument(

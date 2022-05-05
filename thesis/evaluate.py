@@ -242,10 +242,11 @@ def plot_time_hierarchy(data: Dict[str, float]):
 
 def sample_timbre_transfer(model):
     data_provider = ddsp.training.data.TFRecordProvider(
-        file_pattern="/cluster/home/vvolhejn/datasets/transfer2/transfer2.tfrecord*"
+        # transfer3 for the VST models, transfer2 for the older ones
+        file_pattern="/cluster/home/vvolhejn/datasets/transfer3/transfer3.tfrecord*"
     )
 
-    dataset = data_provider.get_batch(batch_size=1, shuffle=True, repeats=1)
+    dataset = data_provider.get_batch(batch_size=1, shuffle=False, repeats=1)
 
     dataset_stats = load_dataset_statistics(
         "/cluster/home/vvolhejn/datasets/violin/dataset_statistics_violin.pkl"

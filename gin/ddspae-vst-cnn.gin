@@ -1,0 +1,36 @@
+# -*-Python-*-
+# Like vst.gin, but with a CNN replacing a RNN.
+
+include 'models/vst/vst.gin'
+
+# Decoder
+Autoencoder.decoder = @decoders.DilatedConvDecoder()
+
+DilatedConvDecoder:
+    ch = 128
+    layers_per_stack = 3
+    kernel_size = 3
+
+    norm_type = "layer"
+    input_keys = ('pw_scaled', 'f0_scaled')
+
+    stacks = 2
+    # No resampling unlike in RAVE - DDSP expects the same sampling rate as for the f0 signal from the encoder.
+#    resample_stride = 2
+
+    conditioning_keys = None  # Nothing else than a latent, so no need to consider this separately
+    precondition_stack = None  # Not relevant since `conditioning_keys = None`
+
+#    output_splits = (('control_embedding', %decoder_output_channels),)
+    output_splits = (('amps', 1),
+                     ('harmonic_distribution', 60),
+                     ('noise_magnitudes', 65))
+
+    resample_after_convolve = False
+
+# ==============
+# ProcessorGroup
+# ==============
+
+# Log spectrograms.
+train_util.train.model_specific_summary_fn = @summarize_ddspae
