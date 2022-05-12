@@ -72,12 +72,15 @@ def main(quantized):
         for input_i, input_data in enumerate([batch[0], batch[1]]):
             input_details = interpreter.get_input_details()[input_i]
             if input_details['dtype'] == np.int8:
+                print("SCALING")
                 input_scale, input_zero_point = input_details["quantization"]
                 # TODO: fix this
                 input_scaled = input_data / input_scale + input_zero_point
                 input_scaled = np.clip(input_scaled, -128, 127).astype(input_details["dtype"])
                 # print(input_scale, input_zero_point)
                 inputs_scaled[input_i] = input_scaled
+            else:
+                inputs_scaled[input_i] = input_data
 
         with Timer("Autoencoder.QuantizedDecoder", logger=None):
             features = my_signature(
@@ -128,7 +131,8 @@ def main(quantized):
 
             print("Saved to", path)
 
-        break
+        if i == 10:
+            break
 
     print(
         "Normal runtime:", np.array(Timer.timers._timings["Autoencoder.decoder"])[1:].mean()
