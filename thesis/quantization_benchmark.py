@@ -1,25 +1,27 @@
 import os
+import subprocess
 
 import numpy as np
 import onnx
 import tensorflow as tf
 import onnxruntime as ort
-import rich.table
-from rich import print as rprint
+import torch
 import tqdm
 from codetiming import Timer
 import tf2onnx
 import onnxruntime.quantization as ortq
 import matplotlib.pyplot as plt
+import openvino.runtime
+import pandas as pd
 
 
 class Runtime:
     def __init__(self):
         self.convert_called = False
 
-    def convert(self, keras_model, get_batch_fn=None):
+    def convert(self, orig_model, get_batch_fn=None):
         self.convert_called = True
-        self.keras_model = keras_model
+        self.orig_model = orig_model
 
     def run(self, data):
         assert self.convert_called, "No model was converted, call convert() first."
@@ -34,6 +36,14 @@ class Runtime:
         return self.get_name() + "_" + hex(id(self))
 
 
+class NeedsPyTorchModel:
+    """
+    Used only to tag runtimes that converts a PyTorch model rather than a Keras one
+    """
+
+    pass
+
+
 class TFLite(Runtime):
     def __init__(self, quantization_mode):
         super().__init__()
@@ -43,10 +53,10 @@ class TFLite(Runtime):
 
         self.quantization_mode = quantization_mode
 
-    def convert(self, keras_model, get_batch_fn=None):
-        super().convert(keras_model)
+    def convert(self, orig_model, get_batch_fn=None):
+        super().convert(orig_model)
 
-        tflite_converter = tf.lite.TFLiteConverter.from_keras_model(self.keras_model)
+        tflite_converter = tf.lite.TFLiteConverter.from_keras_model(self.orig_model)
         tflite_converter.target_spec.supported_ops = [
             tf.lite.OpsSet.TFLITE_BUILTINS,  # Enable TensorFlow Lite ops.
             tf.lite.OpsSet.SELECT_TF_OPS,  # Enable extended TensorFlow ops.
@@ -106,16 +116,104 @@ class TFLite(Runtime):
 
 class TensorFlow(Runtime):
     def run(self, data):
-        output = self.keras_model(data)
+        super().run(data)
+
+        output = self.orig_model(data)
         return output
 
     def get_name(self):
         return f"TensorFlow"
 
 
+class PyTorch(Runtime, NeedsPyTorchModel):
+    def __init__(self, quantization_mode, use_torchscript=False):
+        super().__init__()
+
+        modes = {"off", "dynamic", "static"}
+        assert quantization_mode in modes, f"quantization_mode must be one of {modes}"
+        self.quantization_mode = quantization_mode
+        self.use_torchscript = use_torchscript
+
+    def convert(self, orig_model, get_batch_fn=None):
+        super().convert(orig_model)
+
+        if self.quantization_mode == "off":
+            self.model = orig_model
+        elif self.quantization_mode == "dynamic":
+            self.model = torch.quantization.quantize_dynamic(
+                orig_model, {torch.nn.Linear}, dtype=torch.qint8
+            )
+        else:
+            assert self.quantization_mode == "static"
+
+            model = PyTorchQuantizationWrapper(orig_model)
+            model.eval()
+            model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+
+            # Note: we could also fuse layers using torch.quantization.fuse_modules
+
+            # Prepare for calibration
+            model = torch.quantization.prepare(model)
+
+            for i in range(100):
+                data = torch.permute(torch.from_numpy(get_batch_fn()), (0, 3, 1, 2))
+                model(data)
+
+            self.model = torch.quantization.convert(model)
+
+        if self.use_torchscript:
+            data = torch.permute(torch.from_numpy(get_batch_fn()), (0, 3, 1, 2))
+            self.model = torch.jit.trace(self.model, data)
+
+    def run(self, data):
+        super().run(data)
+
+        data = torch.from_numpy(data)
+        # Torch needs NCHW instead of TensorFlow's NHWC
+        data = torch.permute(data, (0, 3, 1, 2))
+
+        output = self.model(data)
+
+        return output.detach().numpy()
+
+    def get_name(self):
+        d = {
+            "off": "",
+            "dynamic": "_quant_dynamic",
+            "static": "_quant_static",
+        }
+
+        prefix = "TorchScript" if self.use_torchscript else "PyTorch"
+
+        return f"{prefix}{d[self.quantization_mode]}"
+
+
+class PyTorchQuantizationWrapper(torch.nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+        # QuantStub converts tensors from floating point to quantized
+        self.quant = torch.quantization.QuantStub()
+        # DeQuantStub converts tensors from quantized to floating point
+        self.dequant = torch.quantization.DeQuantStub()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.model(x)
+        x = self.dequant(x)
+        return x
+
+
 class ONNXRuntime(Runtime):
     def __init__(
-        self, quantization_mode, unsigned_activations=False, unsigned_weights=False
+        self,
+        quantization_mode,
+        unsigned_activations=False,
+        unsigned_weights=False,
+        # Warning: if the OpenVINO Execution Provider is not available,
+        # silently defaults back to CPU
+        use_openvino=False,
     ):
         super().__init__()
 
@@ -125,19 +223,26 @@ class ONNXRuntime(Runtime):
         self.quantization_mode = quantization_mode
         self.unsigned_activations = unsigned_activations
         self.unsigned_weights = unsigned_weights
+        self.use_openvino = use_openvino
 
-    def convert(self, keras_model, get_batch_fn=None):
-        super().convert(keras_model)
+    def save_model(self, orig_model, get_batch_fn):
         input_signature = [
-            tf.TensorSpec([1] + keras_model.input.shape[1:], dtype=np.float32, name="input")
+            tf.TensorSpec(
+                [1] + orig_model.input.shape[1:], dtype=np.float32, name="input"
+            )
         ]
         onnx_model, _ = tf2onnx.convert.from_keras(
-            keras_model, input_signature, opset=13
+            orig_model, input_signature, opset=13
         )
 
         save_path = os.path.join("/tmp", self.get_id() + ".onnx")
         onnx.save(onnx_model, save_path)
         self.save_path = save_path
+
+    def convert(self, orig_model, get_batch_fn=None):
+        super().convert(orig_model)
+
+        self.save_model(orig_model, get_batch_fn)
 
         def get_type(is_unsigned):
             return ortq.QuantType.QUInt8 if is_unsigned else ortq.QuantType.QInt8
@@ -147,7 +252,7 @@ class ONNXRuntime(Runtime):
 
             if self.quantization_mode == "dynamic":
                 ortq.quantize_dynamic(
-                    save_path,
+                    self.save_path,
                     save_path_2,
                     # Signed weights don't work for convolutions?
                     # see https://github.com/microsoft/onnxruntime/issues/3130
@@ -155,6 +260,7 @@ class ONNXRuntime(Runtime):
                     # Cannot set activation type for dynamic quantization.
                 )
             else:
+
                 class DataReader(ortq.CalibrationDataReader):
                     def __init__(self, get_batch_fn):
                         self.i = 0
@@ -175,9 +281,9 @@ class ONNXRuntime(Runtime):
 
                 save_path_2 = os.path.join("/tmp", self.get_id() + "_2.onnx")
                 ortq.quantize_static(
-                    save_path,
+                    self.save_path,
                     save_path_2,
-                    DataReader(get_batch_fn),
+                    DataReader(lambda: self.preprocess_input(get_batch_fn())),
                     activation_type=get_type(self.unsigned_activations),
                     weight_type=get_type(self.unsigned_weights),
                     per_channel=True,
@@ -186,10 +292,18 @@ class ONNXRuntime(Runtime):
 
             self.save_path = save_path_2
 
-        self.session = ort.InferenceSession(self.save_path)
+        self.session = ort.InferenceSession(
+            self.save_path,
+            providers=[
+                "OpenVINOExecutionProvider"
+                if self.use_openvino
+                else "CPUExecutionProvider"
+            ],
+        )
 
     def run(self, data):
         super().run(data)
+        data = self.preprocess_input(data)
 
         input_names = [inp.name for inp in self.session.get_inputs()]
         assert len(input_names) == 1, "Expected only one input to ONNX model"
@@ -206,8 +320,75 @@ class ONNXRuntime(Runtime):
             "static_qoperator": "_quant_static_qoperator",
             "static_qdq": "_quant_static_qdq",
         }
+        openvino_s = "_openvino" if self.use_openvino else ""
+        type_name = type(self).__name__
 
-        return f"ONNXRuntime{d[self.quantization_mode]}"
+        return f"{type_name}{d[self.quantization_mode]}{openvino_s}"
+
+    def preprocess_input(self, data):
+        """ONNXRuntimeFromPyTorch overrides this to change the order of axes."""
+        return data
+
+
+class ONNXRuntimeFromPyTorch(ONNXRuntime, NeedsPyTorchModel):
+    def save_model(self, orig_model, get_batch_fn):
+        self.save_path = os.path.join("/tmp", self.get_id() + ".onnx")
+        torch.onnx.export(
+            orig_model,  # model being run
+            torch.permute(torch.from_numpy(get_batch_fn()), (0, 3, 1, 2)),
+            self.save_path,
+            # where to save the model (can be a file or file-like object)
+            export_params=True,
+            opset_version=13,
+            # whether to execute constant folding for optimization
+            do_constant_folding=True,
+            input_names=["input"],
+            output_names=["output"],
+        )
+
+    def preprocess_input(self, data):
+        data = np.moveaxis(data, 3, 1)
+        return data
+
+
+class OpenVINO(ONNXRuntime):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def convert(self, orig_model, get_batch_fn=None):
+        super().convert(orig_model, get_batch_fn)
+        self.save_dir = os.path.join("/tmp", self.get_id())
+        os.makedirs(self.save_dir)
+
+        mo_command = [
+            "mo",
+            "--input_model",
+            self.save_path,
+            "--output_dir",
+            self.save_dir,
+        ]
+        subprocess.run(mo_command)
+
+        self.ie = openvino.runtime.Core()
+        model = self.ie.read_model(
+            model=os.path.join(
+                self.save_dir,
+                os.path.splitext(os.path.basename(self.save_path))[0] + ".xml",
+            )
+        )
+        self.compiled_model = self.ie.compile_model(model=model, device_name="CPU")
+        self.input_names = [x.any_name for x in self.compiled_model.inputs]
+        self.request = self.compiled_model.create_infer_request()
+
+    def run(self, data):
+        # Checks that the model has been converted
+        Runtime.run(self, data)
+
+        output = self.request.infer({self.input_names[0]: data})
+
+        output_list = list(output.values())
+        assert len(output_list) == 1, "Only one output was expected."
+        return output_list[0]
 
 
 class BenchmarkedRuntime:
@@ -233,7 +414,7 @@ class BenchmarkedRuntime:
         return output
 
 
-def benchmark(keras_model, runtimes, n_iterations=100):
+def benchmark(keras_model, torch_model, runtimes, n_iterations=100):
     input_shape = [1] + list(keras_model.input.shape)[1:]
 
     def make_batch():
@@ -242,57 +423,129 @@ def benchmark(keras_model, runtimes, n_iterations=100):
     benchmarked_runtimes = []
     for runtime in runtimes:
         print(f"Converting model to runtime {runtime.get_id()}")
-        runtime.convert(keras_model, get_batch_fn=make_batch)
+
+        orig_model = (
+            torch_model if isinstance(runtime, NeedsPyTorchModel) else keras_model
+        )
+
+        runtime.convert(orig_model, get_batch_fn=make_batch)
         benchmarked_runtimes.append(BenchmarkedRuntime(runtime))
     print("Done converting.")
 
     loss = tf.keras.losses.MeanSquaredError(reduction="sum", name="mean_squared_error")
 
-    for i in tqdm.trange(n_iterations):
-        batch = make_batch()
+    batches = [make_batch() for _ in range(n_iterations + 1)]
+    true_outputs = {
+        "keras": [None for _ in range(n_iterations + 1)],
+        "torch": [None for _ in range(n_iterations + 1)],
+    }
 
-        true_output = None
+    for br in tqdm.tqdm(benchmarked_runtimes):
+        for i in range(n_iterations + 1):
+            batch = batches[i]
 
-        for br in benchmarked_runtimes:
-            output = br.run_batch(batch, loss, true_output)
+            framework = (
+                "torch" if isinstance(br.runtime, NeedsPyTorchModel) else "keras"
+            )
 
-            if true_output is None:
+            output = br.run_batch(batch, loss, true_outputs[framework][i])
+
+            if true_outputs[framework][i] is None:
                 # The first runtime's output is considered to be the ground truth
-                true_output = output
+                true_outputs[framework][i] = output
 
-    table = rich.table.Table(title="Summary")
-    table.add_column("Name")
-    table.add_column("Loss")
-    table.add_column("Inference time")
-    table.add_column("Relative time")
+    all_runs = []
 
-    mean_times = []
-    stds = []
-
-    baseline_time = None
     for i, br in enumerate(benchmarked_runtimes):
-        assert len(br.losses) > 0
-        assert len(br.times) > 1  # We drop the first round
+        # We drop the first round
+        assert len(br.losses) > 1
+        assert len(br.times) > 1
 
-        #mean_time = np.median(np.array(br.times)[1:])
-        mean_time = np.array(br.times)[1:].mean()
-        if baseline_time is None:
-            baseline_time = mean_time
+        for j in range(1, n_iterations + 1):
+            all_runs.append(
+                {
+                    "name": br.runtime.get_name(),
+                    "iteration": j,
+                    "loss": br.losses[j],
+                    "inference_time": br.times[j],
+                },
+            )
 
-        mean_times.append(mean_time)
-        stds.append(np.array(br.times)[1:].std())
+    all_runs = pd.DataFrame(
+        columns=["name", "iteration", "loss", "inference_time"], data=all_runs
+    )
 
-        table.add_row(
-            br.runtime.get_name(),
-            f"{np.mean(br.losses):.2e}",
-            f"{mean_time:.5f}",
-            f"{mean_time / baseline_time:.3f}",
+    return all_runs
+
+
+def summarize_runs(all_runs_df):
+    df = all_runs_df.groupby("name").agg(
+        {"loss": ["mean", "std"], "inference_time": ["mean", "std"]}
+    )
+    # Flatten the hierarchical index
+    df.columns = ["_".join(col).strip() for col in df.columns.values]
+
+    return df
+
+
+def plot_runs(all_runs_df, sort=True):
+    import seaborn as sns
+
+    order = None
+    if sort:
+        order = (
+            all_runs_df.groupby("name")
+            .agg({"inference_time": "mean"})
+            .sort_values("inference_time")
+            .index
         )
 
-    rprint(table)
+    ax = sns.barplot(
+        data=all_runs_df,
+        y="name",
+        x="inference_time",
+        order=order,
+    )
 
-    print(mean_times[0], stds[0])
+    return ax
 
-    plt.barh([br.runtime.get_name() for br in benchmarked_runtimes], mean_times)
 
-    return benchmarked_runtimes
+def get_runtimes(good_only=True, unsigned_weights=False):
+    runtimes = [
+        (False, TensorFlow()),
+        (True, PyTorch(quantization_mode="off", use_torchscript=True)),
+        (True, PyTorch(quantization_mode="dynamic", use_torchscript=True)),
+        (True, PyTorch(quantization_mode="static", use_torchscript=True)),
+        (True, TFLite(quantization_mode="off")),
+        (False, TFLite(quantization_mode="dynamic")),  # bad for CNN
+        (False, TFLite(quantization_mode="static")),  # bad for CNN
+        (True, ONNXRuntime(quantization_mode="off")),
+        (
+            True,
+            ONNXRuntime(quantization_mode="dynamic", unsigned_weights=unsigned_weights),
+        ),
+        (False, ONNXRuntime(quantization_mode="static_qoperator")),  # bad
+        (True, ONNXRuntime(quantization_mode="static_qdq")),
+        (False, ONNXRuntimeFromPyTorch(quantization_mode="off")),
+        (
+            False,
+            ONNXRuntimeFromPyTorch(
+                quantization_mode="dynamic", unsigned_weights=unsigned_weights
+            ),
+        ),
+        (False, ONNXRuntimeFromPyTorch(quantization_mode="static_qoperator")),  # bad
+        (False, ONNXRuntimeFromPyTorch(quantization_mode="static_qdq")),
+        (True, OpenVINO(quantization_mode="off")),
+        (
+            False,
+            OpenVINO(quantization_mode="dynamic", unsigned_weights=unsigned_weights),
+        ),  # bad
+        (True, OpenVINO(quantization_mode="static_qdq")),
+    ]
+
+    # should be possible but doesn't work: OpenVINO(quantization_mode="static_qoperator")
+
+    if good_only:
+        return [rt for good, rt in runtimes if good]
+    else:
+        return [rt for good, rt in runtimes]
