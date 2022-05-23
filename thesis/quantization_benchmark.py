@@ -11,8 +11,9 @@ from codetiming import Timer
 import tf2onnx
 import onnxruntime.quantization as ortq
 import matplotlib.pyplot as plt
-import openvino.runtime
 import pandas as pd
+
+TEMP_DIR = "/tmp"
 
 
 class Runtime:
@@ -82,7 +83,7 @@ class TFLite(Runtime):
         tflite_model = tflite_converter.convert()  # Byte string.
         # # Save the model.
         # model_name = "model_quantized.tflite" if quantize else "model_unquantized.tflite"
-        save_path = os.path.join("/tmp", self.get_id() + ".tflite")
+        save_path = os.path.join(TEMP_DIR, self.get_id() + ".tflite")
         with open(save_path, "wb") as f:
             f.write(tflite_model)
 
@@ -141,7 +142,9 @@ class PyTorch(Runtime, NeedsPyTorchModel):
             self.model = orig_model
         elif self.quantization_mode == "dynamic":
             self.model = torch.quantization.quantize_dynamic(
-                orig_model, {torch.nn.Linear}, dtype=torch.qint8
+                orig_model,
+                # {torch.nn.Linear},
+                dtype=torch.qint8,
             )
         else:
             assert self.quantization_mode == "static"
@@ -235,7 +238,7 @@ class ONNXRuntime(Runtime):
             orig_model, input_signature, opset=13
         )
 
-        save_path = os.path.join("/tmp", self.get_id() + ".onnx")
+        save_path = os.path.join(TEMP_DIR, self.get_id() + ".onnx")
         onnx.save(onnx_model, save_path)
         self.save_path = save_path
 
@@ -248,7 +251,7 @@ class ONNXRuntime(Runtime):
             return ortq.QuantType.QUInt8 if is_unsigned else ortq.QuantType.QInt8
 
         if self.quantization_mode in {"dynamic", "static_qoperator", "static_qdq"}:
-            save_path_2 = os.path.join("/tmp", self.get_id() + "_2.onnx")
+            save_path_2 = os.path.join(TEMP_DIR, self.get_id() + "_2.onnx")
 
             if self.quantization_mode == "dynamic":
                 ortq.quantize_dynamic(
@@ -267,7 +270,7 @@ class ONNXRuntime(Runtime):
                         self.get_batch_fn = get_batch_fn
 
                     def get_next(self):
-                        if self.i == 100:
+                        if self.i == 10:
                             return None
                         else:
                             self.i += 1
@@ -279,7 +282,7 @@ class ONNXRuntime(Runtime):
                     else ortq.QuantFormat.QOperator
                 )
 
-                save_path_2 = os.path.join("/tmp", self.get_id() + "_2.onnx")
+                save_path_2 = os.path.join(TEMP_DIR, self.get_id() + "_2.onnx")
                 ortq.quantize_static(
                     self.save_path,
                     save_path_2,
@@ -292,6 +295,16 @@ class ONNXRuntime(Runtime):
 
             self.save_path = save_path_2
 
+        # We need to set intra_op_num_threads because otherwise we get a crash on Euler:
+        # see https://github.com/microsoft/onnxruntime/issues/10113
+        session_options = ort.SessionOptions()
+        n_cpus_available = len(os.sched_getaffinity(0))
+        session_options.intra_op_num_threads = n_cpus_available
+
+        session_options.graph_optimization_level = (
+            ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
+        )
+
         self.session = ort.InferenceSession(
             self.save_path,
             providers=[
@@ -299,6 +312,7 @@ class ONNXRuntime(Runtime):
                 if self.use_openvino
                 else "CPUExecutionProvider"
             ],
+            sess_options=session_options,
         )
 
     def run(self, data):
@@ -332,7 +346,7 @@ class ONNXRuntime(Runtime):
 
 class ONNXRuntimeFromPyTorch(ONNXRuntime, NeedsPyTorchModel):
     def save_model(self, orig_model, get_batch_fn):
-        self.save_path = os.path.join("/tmp", self.get_id() + ".onnx")
+        self.save_path = os.path.join(TEMP_DIR, self.get_id() + ".onnx")
         torch.onnx.export(
             orig_model,  # model being run
             torch.permute(torch.from_numpy(get_batch_fn()), (0, 3, 1, 2)),
@@ -353,11 +367,15 @@ class ONNXRuntimeFromPyTorch(ONNXRuntime, NeedsPyTorchModel):
 
 class OpenVINO(ONNXRuntime):
     def __init__(self, *args, **kwargs):
+        # import openvino.runtime
+
         super().__init__(*args, **kwargs)
 
     def convert(self, orig_model, get_batch_fn=None):
+        from openvino.inference_engine import IECore
+
         super().convert(orig_model, get_batch_fn)
-        self.save_dir = os.path.join("/tmp", self.get_id())
+        self.save_dir = os.path.join(TEMP_DIR, self.get_id())
         os.makedirs(self.save_dir)
 
         mo_command = [
@@ -369,22 +387,34 @@ class OpenVINO(ONNXRuntime):
         ]
         subprocess.run(mo_command)
 
-        self.ie = openvino.runtime.Core()
-        model = self.ie.read_model(
+        # self.ie = openvino.runtime.Core()
+        # model = self.ie.read_model(
+        #     model=os.path.join(
+        #         self.save_dir,
+        #         os.path.splitext(os.path.basename(self.save_path))[0] + ".xml",
+        #     )
+        # )
+        # self.compiled_model = self.ie.compile_model(model=model, device_name="CPU")
+        # self.input_names = [x.any_name for x in self.compiled_model.inputs]
+        # self.request = self.compiled_model.create_infer_request()
+
+        self.ie = IECore()
+        model = self.ie.read_network(
             model=os.path.join(
                 self.save_dir,
                 os.path.splitext(os.path.basename(self.save_path))[0] + ".xml",
             )
         )
-        self.compiled_model = self.ie.compile_model(model=model, device_name="CPU")
-        self.input_names = [x.any_name for x in self.compiled_model.inputs]
-        self.request = self.compiled_model.create_infer_request()
+        self.compiled_model = self.ie.load_network(network=model, device_name="CPU")
+        self.input_names = list(self.compiled_model.input_info)
+        # self.request = self.compiled_model.create_infer_request()
 
     def run(self, data):
         # Checks that the model has been converted
         Runtime.run(self, data)
 
-        output = self.request.infer({self.input_names[0]: data})
+        output = self.compiled_model.infer({self.input_names[0]: data})
+        # output = self.request.infer({self.input_names[0]: data})
 
         output_list = list(output.values())
         assert len(output_list) == 1, "Only one output was expected."
@@ -428,8 +458,11 @@ def benchmark(keras_model, torch_model, runtimes, n_iterations=100):
             torch_model if isinstance(runtime, NeedsPyTorchModel) else keras_model
         )
 
-        runtime.convert(orig_model, get_batch_fn=make_batch)
-        benchmarked_runtimes.append(BenchmarkedRuntime(runtime))
+        if orig_model is not None:
+            # The Torch model might be None, in that case just skip the PyTorch runtimes
+            runtime.convert(orig_model, get_batch_fn=make_batch)
+            benchmarked_runtimes.append(BenchmarkedRuntime(runtime))
+
     print("Done converting.")
 
     loss = tf.keras.losses.MeanSquaredError(reduction="sum", name="mean_squared_error")
@@ -440,7 +473,7 @@ def benchmark(keras_model, torch_model, runtimes, n_iterations=100):
         "torch": [None for _ in range(n_iterations + 1)],
     }
 
-    for br in tqdm.tqdm(benchmarked_runtimes):
+    for br in benchmarked_runtimes:
         for i in range(n_iterations + 1):
             batch = batches[i]
 
@@ -535,6 +568,8 @@ def get_runtimes(good_only=True, unsigned_weights=False):
         ),
         (False, ONNXRuntimeFromPyTorch(quantization_mode="static_qoperator")),  # bad
         (False, ONNXRuntimeFromPyTorch(quantization_mode="static_qdq")),
+        #
+        #
         (True, OpenVINO(quantization_mode="off")),
         (
             False,
