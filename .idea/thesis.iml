@@ -12,7 +12,7 @@
       <excludeFolder url="file://$MODULE_DIR$/logdir" />
       <excludeFolder url="file://$MODULE_DIR$/wandb" />
     </content>
-    <orderEntry type="jdk" jdkName="Python 3.9 (venv)" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Python 3.9 (venv2)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="module" module-name="gjobs" />
     <orderEntry type="module" module-name="ddsp" />
