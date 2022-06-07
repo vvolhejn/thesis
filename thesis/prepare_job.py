@@ -9,6 +9,8 @@ import argparse
 import datetime
 import os
 
+from thesis.prepare_job_util import get_today_string, add_distinguishing_suffix
+
 HEADER = r"""
 module load gcc/8.2.0
 module load python_gpu/3.8.5
@@ -49,14 +51,6 @@ DEFAULT_GIN_PARAMS = {
     # For evaluation
     # "compute_f0.model_name": "'spice-v2'",  # "'crepe-tiny'"
 }
-
-
-# This function is also in `util` but that module imports TensorFlow, which is slow
-def get_today_string():
-    """0331, 0611 etc."""
-    today = datetime.date.today()
-    date_s = today.strftime("%m%d")
-    return date_s
 
 
 class ParseGinParams(argparse.Action):
@@ -111,27 +105,6 @@ def prepare_job(
     job += " \\\n  ".join(["nas_run"] + params)
 
     return job
-
-
-def add_distinguishing_suffix(base_dir, name):
-    """
-    Choose a dir name that doesn't exist yet by trying to append '-1', '-2' and so on.
-    """
-    n = 0
-    while True:
-        candidate = name
-        if n > 0:
-            candidate += f"-{n}"
-
-        path = os.path.expanduser(os.path.join(base_dir, candidate))
-        if not os.path.exists(path):
-            return candidate
-        elif os.path.isdir(path) and os.listdir(path) == []:
-            # If the directory exists but is empty, this probably means an earlier
-            # attempt at submission crashed. Reuse the directory in this case.
-            return candidate
-        else:
-            n += 1
 
 
 def create_job_dir(base_dir, name, gin_file):

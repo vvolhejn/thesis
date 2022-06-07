@@ -1,2 +1,4 @@
 ddsp
-
+tqdm
+onnx>=1.11
+rich

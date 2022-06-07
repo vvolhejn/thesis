@@ -12,6 +12,7 @@ import tf2onnx
 import onnxruntime.quantization as ortq
 import matplotlib.pyplot as plt
 import pandas as pd
+import tensorflow_model_optimization as tfmot
 
 TEMP_DIR = "/tmp"
 
@@ -26,6 +27,10 @@ class Runtime:
 
     def run(self, data):
         assert self.convert_called, "No model was converted, call convert() first."
+
+    def run_timed(self, data, timer):
+        with timer:
+            return self.run(data)
 
     def get_name(self):
         raise NotImplementedError
@@ -46,7 +51,7 @@ class NeedsPyTorchModel:
 
 
 class TFLite(Runtime):
-    def __init__(self, quantization_mode):
+    def __init__(self, quantization_mode, sparsity=0.0):
         super().__init__()
 
         modes = {"off", "dynamic", "static"}
@@ -54,8 +59,14 @@ class TFLite(Runtime):
 
         self.quantization_mode = quantization_mode
 
+        assert 0.0 <= sparsity < 1.0
+        self.sparsity = sparsity
+
     def convert(self, orig_model, get_batch_fn=None):
         super().convert(orig_model)
+
+        if self.sparsity > 0:
+            self.prune()
 
         tflite_converter = tf.lite.TFLiteConverter.from_keras_model(self.orig_model)
         tflite_converter.target_spec.supported_ops = [
@@ -63,8 +74,15 @@ class TFLite(Runtime):
             tf.lite.OpsSet.SELECT_TF_OPS,  # Enable extended TensorFlow ops.
         ]
 
+        tflite_converter.optimizations = []
+
         if self.quantization_mode in {"dynamic", "static"}:
-            tflite_converter.optimizations = [tf.lite.Optimize.DEFAULT]
+            tflite_converter.optimizations.append(tf.lite.Optimize.DEFAULT)
+
+        if self.sparsity > 0:
+            tflite_converter.optimizations.append(
+                tf.lite.Optimize.EXPERIMENTAL_SPARSITY
+            )
 
         # print(f"Quantization {'on' if quantize else 'off'}.")
 
@@ -92,6 +110,55 @@ class TFLite(Runtime):
         interpreter = tf.lite.Interpreter(self.save_path)
         self.signature = interpreter.get_signature_runner()
 
+    def prune(self):
+        is_conv = False
+        for layer in self.orig_model.layers:
+            if isinstance(layer, tf.keras.layers.Conv2D):
+                print("It's conv!")
+                is_conv = True
+
+        model_for_pruning = tfmot.sparsity.keras.prune_low_magnitude(
+            # We have to clone the model, otherwise the original weights are modified
+            tf.keras.models.clone_model(self.orig_model),
+            pruning_schedule=tfmot.sparsity.keras.ConstantSparsity(
+                self.sparsity, begin_step=0
+            ),
+            # block_size=(1, 1) if is_conv else (1, 16),
+        )
+        callbacks = [
+            tfmot.sparsity.keras.UpdatePruningStep(),
+        ]
+
+        model_for_pruning.compile(
+            loss=tf.keras.losses.MeanSquaredError(),
+            optimizer="adam",
+            metrics=["accuracy"],
+        )
+
+        n_samples = 100
+        input_shape = [n_samples] + list(self.orig_model.input.shape)[1:]
+        output_shape = [n_samples] + list(self.orig_model.output.shape)[1:]
+
+        model_for_pruning.fit(
+            np.random.randn(*input_shape).astype(np.float32),
+            np.random.randn(*output_shape).astype(np.float32),
+            callbacks=callbacks,
+            epochs=2,
+            # larger batch size misbihaves:
+            # https://github.com/tensorflow/model-optimization/issues/973
+            batch_size=1,
+            # validation_split=0.1,
+            verbose=0,
+        )
+
+        # Sanity check - did we really prune?
+        for l in model_for_pruning.layers:
+            if isinstance(l.layer, (tf.keras.layers.Conv2D, tf.keras.layers.Dense)):
+                layer_sparsity = (l.layer.weights[0] == 0).numpy().mean()
+                assert (
+                    layer_sparsity > 0.99 * self.sparsity
+                ), f"Layer {l.layer} has sparsity {layer_sparsity}, expected {self.sparsity}"
+
     def run(self, data):
         input_keys = list(self.signature.get_input_details().keys())
         assert len(input_keys) == 1, "Expected just one input key in the TFLite model."
@@ -111,8 +178,12 @@ class TFLite(Runtime):
             "dynamic": "_quant_dynamic",
             "static": "_quant_static",
         }
+        res = f"TFLite{d[self.quantization_mode]}"
 
-        return f"TFLite{d[self.quantization_mode]}"
+        if self.sparsity > 0:
+            res += f"_{self.sparsity:.2f}_sparse"
+
+        return res
 
 
 class TensorFlow(Runtime):
@@ -159,23 +230,33 @@ class PyTorch(Runtime, NeedsPyTorchModel):
             model = torch.quantization.prepare(model)
 
             for i in range(100):
-                data = torch.permute(torch.from_numpy(get_batch_fn()), (0, 3, 1, 2))
+                data = torch.from_numpy(get_batch_fn())
                 model(data)
 
             self.model = torch.quantization.convert(model)
 
         if self.use_torchscript:
-            data = torch.permute(torch.from_numpy(get_batch_fn()), (0, 3, 1, 2))
+            data = torch.from_numpy(get_batch_fn())
             self.model = torch.jit.trace(self.model, data)
 
     def run(self, data):
         super().run(data)
 
         data = torch.from_numpy(data)
-        # Torch needs NCHW instead of TensorFlow's NHWC
-        data = torch.permute(data, (0, 3, 1, 2))
 
         output = self.model(data)
+
+        return output.detach().numpy()
+
+    def run_timed(self, data, timer):
+        """Run in a way that doesn't include the operations around"""
+
+        data = torch.from_numpy(data)
+        # Torch needs NCHW instead of TensorFlow's NHWC
+        # data = torch.permute(data, (0, 3, 1, 2))
+
+        with timer:
+            output = self.model(data)
 
         return output.detach().numpy()
 
@@ -298,11 +379,22 @@ class ONNXRuntime(Runtime):
         # We need to set intra_op_num_threads because otherwise we get a crash on Euler:
         # see https://github.com/microsoft/onnxruntime/issues/10113
         session_options = ort.SessionOptions()
-        n_cpus_available = len(os.sched_getaffinity(0))
+        try:
+            n_cpus_available = len(os.sched_getaffinity(0))
+        except AttributeError:
+            # `os.sched_getaffinity()` is not available everywhere - e.g. not on my Mac.
+            # The alternative `os.cpu_count()` counts all CPUs, not just the ones
+            # that the process is allowed to use. Good enough.
+            n_cpus_available = os.cpu_count()
+
         session_options.intra_op_num_threads = n_cpus_available
 
         session_options.graph_optimization_level = (
             ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
+        )
+        session_options.optimized_model_filepath = os.path.join(
+            TEMP_DIR,
+            f"{self.get_id()}_optimized.onnx",
         )
 
         self.session = ort.InferenceSession(
@@ -349,7 +441,7 @@ class ONNXRuntimeFromPyTorch(ONNXRuntime, NeedsPyTorchModel):
         self.save_path = os.path.join(TEMP_DIR, self.get_id() + ".onnx")
         torch.onnx.export(
             orig_model,  # model being run
-            torch.permute(torch.from_numpy(get_batch_fn()), (0, 3, 1, 2)),
+            torch.from_numpy(get_batch_fn()),
             self.save_path,
             # where to save the model (can be a file or file-like object)
             export_params=True,
@@ -429,8 +521,7 @@ class BenchmarkedRuntime:
         self.losses = []
 
     def run_batch(self, batch, loss_fn, true_output):
-        with self.timer:
-            output = self.runtime.run(batch)
+        output = self.runtime.run_timed(batch, self.timer)
 
         assert output is not None, f"No output returned by runtime {self.runtime}"
 
@@ -445,29 +536,44 @@ class BenchmarkedRuntime:
 
 
 def benchmark(keras_model, torch_model, runtimes, n_iterations=100):
-    input_shape = [1] + list(keras_model.input.shape)[1:]
+    keras_input_shape = [1] + list(keras_model.input.shape)[1:]
 
-    def make_batch():
-        return np.random.randn(*input_shape).astype(np.float32)
+    def keras_make_batch():
+        return np.random.randn(*keras_input_shape).astype(np.float32)
+
+    if len(keras_input_shape) == 4:
+        b, h, w, c = keras_input_shape
+        torch_input_shape = [b, c, h, w]
+        print(
+            f"4D input detected -> reordering torch input shape from "
+            f"{keras_input_shape} to {torch_input_shape}"
+        )
+    else:
+        torch_input_shape = keras_input_shape
+
+    def torch_make_batch():
+        return np.random.randn(*torch_input_shape).astype(np.float32)
 
     benchmarked_runtimes = []
     for runtime in runtimes:
         print(f"Converting model to runtime {runtime.get_id()}")
 
-        orig_model = (
-            torch_model if isinstance(runtime, NeedsPyTorchModel) else keras_model
-        )
+        is_torch_model = isinstance(runtime, NeedsPyTorchModel)
+        orig_model = torch_model if is_torch_model else keras_model
 
+        # The Torch model might be None, in that case just skip the PyTorch runtimes
         if orig_model is not None:
-            # The Torch model might be None, in that case just skip the PyTorch runtimes
-            runtime.convert(orig_model, get_batch_fn=make_batch)
+            runtime.convert(
+                orig_model,
+                get_batch_fn=torch_make_batch if is_torch_model else keras_make_batch,
+            )
             benchmarked_runtimes.append(BenchmarkedRuntime(runtime))
 
     print("Done converting.")
 
     loss = tf.keras.losses.MeanSquaredError(reduction="sum", name="mean_squared_error")
 
-    batches = [make_batch() for _ in range(n_iterations + 1)]
+    batches = [keras_make_batch() for _ in range(n_iterations + 1)]
     true_outputs = {
         "keras": [None for _ in range(n_iterations + 1)],
         "torch": [None for _ in range(n_iterations + 1)],
@@ -543,15 +649,24 @@ def plot_runs(all_runs_df, sort=True):
     return ax
 
 
-def get_runtimes(good_only=True, unsigned_weights=False):
+def get_runtimes(good_only=True, unsigned_weights=False, is_conv=True):
     runtimes = [
         (False, TensorFlow()),
         (True, PyTorch(quantization_mode="off", use_torchscript=True)),
         (True, PyTorch(quantization_mode="dynamic", use_torchscript=True)),
         (True, PyTorch(quantization_mode="static", use_torchscript=True)),
         (True, TFLite(quantization_mode="off")),
-        (False, TFLite(quantization_mode="dynamic")),  # bad for CNN
-        (False, TFLite(quantization_mode="static")),  # bad for CNN
+        (not is_conv, TFLite(quantization_mode="dynamic")),  # bad for CNN
+        (not is_conv, TFLite(quantization_mode="static")),  # bad for CNN
+        (True, TFLite(quantization_mode="off", sparsity=0.9)),
+        (not is_conv, TFLite(sparsity=0.9, quantization_mode="dynamic")),  # bad for CNN
+        (not is_conv, TFLite(sparsity=0.9, quantization_mode="static")),  # bad for CNN
+        (True, TFLite(quantization_mode="off", sparsity=0.99)),
+        (
+            not is_conv,
+            TFLite(sparsity=0.99, quantization_mode="dynamic"),
+        ),  # bad for CNN
+        (not is_conv, TFLite(sparsity=0.99, quantization_mode="static")),  # bad for CNN
         (True, ONNXRuntime(quantization_mode="off")),
         (
             True,

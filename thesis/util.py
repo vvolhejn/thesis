@@ -6,6 +6,9 @@ from rich.pretty import pprint
 
 import ddsp.training
 
+# Re-export
+from prepare_job_util import get_today_string
+
 
 def resample(x, output_size):
     """
@@ -57,10 +60,3 @@ def summarize_ddspae(outputs, step):
     ddsp.training.summaries.spectrogram_array_summary(
         audios_with_labels, name="spectrograms", step=step
     )
-
-
-def get_today_string():
-    """ 0331, 0611 etc. """
-    today = datetime.date.today()
-    date_s = today.strftime("%m%d")
-    return date_s
