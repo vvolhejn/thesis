@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
+  <component name="AutoUploadManager">
+    <option name="hosts">
+      <list>
+        <option value="135d08d3-bd09-43f8-a0e2-981058ffda29" />
+      </list>
+    </option>
+  </component>
   <component name="PySciProjectComponent">
     <option name="PY_SCI_VIEW_SUGGESTED" value="true" />
   </component>

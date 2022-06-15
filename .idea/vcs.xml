@@ -3,5 +3,6 @@
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/../ddsp" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cpp/extern/cxxopts" vcs="Git" />
   </component>
 </project>

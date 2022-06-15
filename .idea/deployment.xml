@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="Euler" remoteFilesAllowedToDisappearOnAutoupload="false" autoUploadExternalChanges="true">
+  <component name="PublishConfigData" autoUpload="Always" serverName="n1-west1-1" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false" autoUploadExternalChanges="true">
+    <option name="confirmBeforeUploading" value="false" />
     <serverData>
       <paths name="Euler">
         <serverdata>
@@ -12,6 +13,29 @@
           <excludedPaths>
             <excludedPath local="true" path="$PROJECT_DIR$/data" />
             <excludedPath local="true" path="$PROJECT_DIR$/notebooks" />
+          </excludedPaths>
+        </serverdata>
+      </paths>
+      <paths name="n1-west1-1">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/vaclav/ddsp" local="$PROJECT_DIR$/../ddsp" web="/" />
+            <mapping deploy="/home/vaclav/thesis" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="n1-west1-1 (135d08d3-bd09-43f8-a0e2-981058ffda29)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/tmp/tmp.9JHwJxoFVv" local="$PROJECT_DIR$" />
+          </mappings>
+          <excludedPaths>
+            <excludedPath local="true" path="$PROJECT_DIR$/scripts" />
+            <excludedPath local="true" path="$PROJECT_DIR$/thesis" />
+            <excludedPath local="true" path="$PROJECT_DIR$/cpp/cmake-build-debug" />
+            <excludedPath local="true" path="$PROJECT_DIR$/cpp/cmake-build-debug-remote" />
+            <excludedPath local="true" path="$PROJECT_DIR$/notebooks" />
+            <excludedPath local="true" path="$PROJECT_DIR$/data" />
           </excludedPaths>
         </serverdata>
       </paths>
