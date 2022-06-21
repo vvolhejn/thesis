@@ -1,0 +1,25 @@
+version: 0.1.0
+modifiers:
+    - !EpochRangeModifier
+        start_epoch: 0.0
+        end_epoch: 5.0
+
+    - !LearningRateModifier
+        start_epoch: 0
+        end_epoch: 0.5
+        init_lr: 0.005
+        lr_class:  ExponentialLR
+        lr_kwargs: {'gamma': 0.9}
+
+    - !GMPruningModifier
+        start_epoch: 0
+        end_epoch: 4.0
+        update_frequency: 1.0
+        init_sparsity: 0.05
+        final_sparsity: 0.9
+        mask_type: unstructured
+#        params: ['sections.0.0.conv1.weight', 'sections.0.0.conv2.weight', 'sections.0.0.conv3.weight']
+        params:  __ALL__
+
+    - !QuantizationModifier
+        start_epoch: 0.0
