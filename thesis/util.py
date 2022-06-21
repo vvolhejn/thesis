@@ -1,3 +1,4 @@
+import os
 import datetime
 
 import gin
@@ -7,7 +8,7 @@ from rich.pretty import pprint
 import ddsp.training
 
 # Re-export
-from prepare_job_util import get_today_string
+from thesis.prepare_job_util import get_today_string
 
 
 def resample(x, output_size):
@@ -60,3 +61,13 @@ def summarize_ddspae(outputs, step):
     ddsp.training.summaries.spectrogram_array_summary(
         audios_with_labels, name="spectrograms", step=step
     )
+
+
+def get_n_cpus_available():
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        # `os.sched_getaffinity()` is not available everywhere - e.g. not on my Mac.
+        # The alternative `os.cpu_count()` counts all CPUs, not just the ones
+        # that the process is allowed to use. Good enough.
+        return os.cpu_count()

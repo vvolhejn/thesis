@@ -27,7 +27,7 @@ class FilteredNoiseTest(tf.test.TestCase):
         self.assertEqual(
             [
                 batch_size,
-                n_samples // (downsample_per_layer ** n_layers),
+                n_samples // (downsample_per_layer**n_layers),
                 n_noise_bands,
                 n_bands,
             ],

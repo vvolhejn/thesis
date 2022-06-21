@@ -18,7 +18,7 @@ class FakeModel(tf.keras.Model):
 fake_model = FakeModel()
 
 
-with tf.profiler.experimental.Profile('logdir'):
+with tf.profiler.experimental.Profile("logdir"):
     for i in range(10):
         fake_batch = tf.random.normal((8, 32))
         with tf.profiler.experimental.Trace("test", step_num=i):

@@ -204,7 +204,7 @@ def classic_inverse(x, hk):
     y = torch.zeros(*x.shape[:2], hk.shape[0] * x.shape[-1]).to(x)
     y[..., :: hk.shape[0]] = x * hk.shape[0]
     print(y.shape)
-    print(np.array(y[:,:,:50]))
+    print(np.array(y[:, :, :50]))
     y = nn.functional.conv1d(
         y,
         hk.unsqueeze(0),

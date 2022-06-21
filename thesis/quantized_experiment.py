@@ -28,7 +28,9 @@ def main(quantized):
     model_dir = "/Volumes/euler/"
 
     with gin.unlock_config():
-        operative_config = ddsp.training.train_util.get_latest_operative_config(model_dir)
+        operative_config = ddsp.training.train_util.get_latest_operative_config(
+            model_dir
+        )
         gin.parse_config_file(operative_config, skip_unknown=True)
         print(gin.config.config_str())
 
@@ -48,13 +50,17 @@ def main(quantized):
     # print(model.processor_group.processors[3].)
     model.restore(checkpoint_path, verbose=False)
 
-    tflite_file_path = "model_quantized.tflite" if quantized else "model_unquantized.tflite"
+    tflite_file_path = (
+        "model_quantized.tflite" if quantized else "model_unquantized.tflite"
+    )
     tflite_file_path = os.path.join(model_dir, "export/tflite", tflite_file_path)
     interpreter = tf.lite.Interpreter(tflite_file_path)
     my_signature = interpreter.get_signature_runner()
 
     loss = SpectralLoss(logmag_weight=1.0)
-    print("Logmag weight (should be 1.0 to match operative config):", loss.logmag_weight)
+    print(
+        "Logmag weight (should be 1.0 to match operative config):", loss.logmag_weight
+    )
 
     distances = [[], [], []]
 
@@ -71,12 +77,14 @@ def main(quantized):
         inputs_scaled = [None, None]
         for input_i, input_data in enumerate([batch[0], batch[1]]):
             input_details = interpreter.get_input_details()[input_i]
-            if input_details['dtype'] == np.int8:
+            if input_details["dtype"] == np.int8:
                 print("SCALING")
                 input_scale, input_zero_point = input_details["quantization"]
                 # TODO: fix this
                 input_scaled = input_data / input_scale + input_zero_point
-                input_scaled = np.clip(input_scaled, -128, 127).astype(input_details["dtype"])
+                input_scaled = np.clip(input_scaled, -128, 127).astype(
+                    input_details["dtype"]
+                )
                 # print(input_scale, input_zero_point)
                 inputs_scaled[input_i] = input_scaled
             else:
@@ -135,13 +143,16 @@ def main(quantized):
             break
 
     print(
-        "Normal runtime:", np.array(Timer.timers._timings["Autoencoder.decoder"])[1:].mean()
+        "Normal runtime:",
+        np.array(Timer.timers._timings["Autoencoder.decoder"])[1:].mean(),
     )
     print(
         "Quantized runtime:",
         np.array(Timer.timers._timings["Autoencoder.QuantizedDecoder"])[1:].mean(),
     )
-    for i, name in enumerate(["Ground truth - TFLite", "Ground truth - TF", "TFLite - TF"]):
+    for i, name in enumerate(
+        ["Ground truth - TFLite", "Ground truth - TF", "TFLite - TF"]
+    ):
         print(f"{name}:", np.array(distances[i]).mean())
 
     print(f"Reminder: model is {'quantized' if quantized else 'unquantized'}")
@@ -149,9 +160,10 @@ def main(quantized):
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
-    parser.add_argument('--quantized', action='store_true')
-    parser.add_argument('--no-quantized', action='store_false', dest="quantized")
+    parser.add_argument("--quantized", action="store_true")
+    parser.add_argument("--no-quantized", action="store_false", dest="quantized")
     parser.set_defaults(quantized=True)
 
     args = parser.parse_args()

@@ -94,11 +94,12 @@ def prepare_job(
     # Fill in the parameters for the preprocessor that decide whether a cached f0
     # should be used (for training) or whether it should be computed anew (for inference
     # on unseen inputs and evaluation)
-    for param_name in ["F0LoudnessPreprocessor.compute_f0", "OnlineF0PowerPreprocessor.compute_f0"]:
+    for param_name in [
+        "F0LoudnessPreprocessor.compute_f0",
+        "OnlineF0PowerPreprocessor.compute_f0",
+    ]:
         if param_name not in gin_params:
-            gin_params[param_name] = (
-                False if (mode == "train") else True
-            )
+            gin_params[param_name] = False if (mode == "train") else True
 
     params += [f'--gin_param="{k}={v}"' for (k, v) in gin_params.items()]
 

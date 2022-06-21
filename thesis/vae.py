@@ -4,9 +4,10 @@ import ddsp.training
 import tensorflow as tf
 from codetiming import Timer
 
+
 @gin.register
 class VAE(ddsp.training.models.Autoencoder):
-    """ Variational autoencoder. """
+    """Variational autoencoder."""
 
     def __init__(self, kl_loss_weight=1.0, **kwargs):
         super().__init__(**kwargs)

@@ -23,6 +23,7 @@ from thesis.timbre_transfer_util import adjust_batch, load_dataset_statistics
 from thesis.util import get_today_string
 import thesis.newt
 
+
 @gin.configurable
 def nas_evaluate(
     data_provider,
