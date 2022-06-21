@@ -3,5 +3,5 @@
   <component name="CMakeWorkspace" PROJECT_DIR="$PROJECT_DIR$/cpp">
     <contentRoot DIR="$PROJECT_DIR$" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.9 (venv2)" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="Remote Python 3.8.12 (sftp://vaclav@n1-west1-1:22/home/vaclav/venv3.8/bin/python3)" project-jdk-type="Python SDK" />
 </project>
