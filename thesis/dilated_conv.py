@@ -3,16 +3,32 @@ import gin
 import tensorflow as tf
 import tensorflow.keras.layers as tfkl
 from keras import backend
-import tensorflow_addons as tfa
 
 import ddsp.training
 
 
-def DepthwiseDilatedConv1D(filters, dilation_rate, expansion_rate=4, **kwargs):
+def InvertedBottleneckBlock(
+    filters,
+    kernel_size,
+    dilation_rate,
+    expansion_rate=4,
+    transpose=False,
+    stride=1,  # **kwargs
+):
     """
-    Note that batchnorm is omitted since this is meant for inference only,
-    where BN would get folded into the conv layers anyway.
+    Expects input of shape [batch, time, 1, in_channels]
+    and returns [batch, time, 1, out_channels]
     """
+    assert not transpose, (
+        "The `transpose` argument of InvertedBottleneckBlock "
+        "is only included for signature compatibility and cannot be used."
+    )
+
+    assert stride == 1, (
+        "The `stride` argument of InvertedBottleneckBlock "
+        "is only included for signature compatibility and cannot be used."
+    )
+
     channel_axis = 1 if backend.image_data_format() == "channels_first" else -1
 
     return tf.keras.Sequential(
@@ -23,8 +39,7 @@ def DepthwiseDilatedConv1D(filters, dilation_rate, expansion_rate=4, **kwargs):
                 kernel_size=1,
                 padding="same",
                 use_bias=False,
-                dilation_rate=dilation_rate,
-                **kwargs,
+                # **kwargs,
             ),
             tfkl.BatchNormalization(
                 axis=channel_axis,
@@ -35,11 +50,11 @@ def DepthwiseDilatedConv1D(filters, dilation_rate, expansion_rate=4, **kwargs):
             # Depthwise 3x3 convolution.
             tfkl.DepthwiseConv2D(
                 # no channels argument since this is a depthwise conv
-                kernel_size=(3, 1),
+                kernel_size=(kernel_size, 1),  # should probably be (3, 1)
                 padding="same",
                 use_bias=False,
-                dilation_rate=dilation_rate,
-                **kwargs,
+                dilation_rate=(dilation_rate, 1),
+                # **kwargs,
             ),
             tfkl.BatchNormalization(
                 axis=channel_axis,
@@ -54,16 +69,48 @@ def DepthwiseDilatedConv1D(filters, dilation_rate, expansion_rate=4, **kwargs):
                 padding="same",
                 use_bias=False,
                 activation=None,
-                dilation_rate=dilation_rate,
-                **kwargs,
+                # **kwargs,
             ),
             tfkl.BatchNormalization(axis=channel_axis, epsilon=1e-3, momentum=0.999),
         ]
     )
 
 
+def BasicBlock(
+    filters,
+    kernel_size,
+    dilation_rate,
+    stride=1,
+    transpose=False,
+    **kwargs,
+):
+    channel_axis = 1 if backend.image_data_format() == "channels_first" else -1
+
+    layer_class = tfkl.Conv2DTranspose if transpose else tfkl.Conv2D
+
+    return tf.keras.Sequential(
+        [
+            layer_class(
+                filters,
+                kernel_size=(kernel_size, 1),
+                padding="same",
+                use_bias=False,
+                dilation_rate=(dilation_rate, 1),
+                strides=(stride, 1),
+                **kwargs,
+            ),
+            tfkl.BatchNormalization(
+                axis=channel_axis,
+                epsilon=1e-3,
+                momentum=0.999,
+            ),
+            tfkl.Activation(tf.nn.relu6),
+        ]
+    )
+
+
 @gin.register
-class DepthwiseDilatedConvStack(tfkl.Layer):
+class DilatedConvStack(tfkl.Layer):
     """Stack of dilated 1-D convolutions, optional conditioning at each layer."""
 
     def __init__(
@@ -73,16 +120,11 @@ class DepthwiseDilatedConvStack(tfkl.Layer):
         stacks=2,
         kernel_size=3,
         dilation=2,
-        norm_type=None,
         resample_type=None,
         resample_stride=1,
         stacks_per_resample=1,
         resample_after_convolve=True,
-        spectral_norm=False,
-        ortho_init=False,
-        shift_only=False,
-        conditional=False,
-        expansion_rate=4,
+        use_inverted_bottleneck=False,
         **kwargs,
     ):
         """Constructor.
@@ -94,8 +136,6 @@ class DepthwiseDilatedConvStack(tfkl.Layer):
           stacks: Number of convolutions stacks.
           kernel_size: Size of convolution kernel.
           dilation: Exponent base of dilation factor within a stack.
-          norm_type: Type of normalization before each nonlinearity, choose from
-            'layer', 'instance', or 'group'.
           resample_type: Whether to 'upsample' or 'downsample' the signal. None
             performs no resampling.
           resample_stride: Stride for upsample or downsample layers.
@@ -103,11 +143,6 @@ class DepthwiseDilatedConvStack(tfkl.Layer):
           resample_after_convolve: Ordering of convolution and resampling. If True,
             apply `stacks_per_resample` stacks of convolution then a resampling
             layer. If False, apply the opposite order.
-          spectral_norm: Apply spectral normalization to the convolution weights.
-          ortho_init: Orthogonally initialize the kernel weights.
-          shift_only: Learn/condition only shifts of normalization and not scale.
-          conditional: Use conditioning signal to modulate shifts (and scales) of
-            normalization (FiLM), instead of learned parameters.
           **kwargs: Other keras kwargs.
 
         Returns:
@@ -118,8 +153,6 @@ class DepthwiseDilatedConvStack(tfkl.Layer):
           upsampling or downsampling.
         """
         super().__init__(**kwargs)
-        self.conditional = conditional
-        self.norm_type = norm_type
         self.resample_after_convolve = resample_after_convolve
 
         self.config_dict = {
@@ -128,49 +161,29 @@ class DepthwiseDilatedConvStack(tfkl.Layer):
             "stacks": stacks,
             "kernel_size": kernel_size,
             "dilation": dilation,
-            "norm_type": norm_type,
             "resample_type": resample_type,
             "resample_stride": resample_stride,
             "stacks_per_resample": stacks_per_resample,
             "resample_after_convolve": resample_after_convolve,
-            "spectral_norm": spectral_norm,
-            "ortho_init": ortho_init,
-            "shift_only": shift_only,
-            "conditional": conditional,
-            "expansion_rate": expansion_rate,
         }
 
-        initializer = "orthogonal" if ortho_init else "glorot_uniform"
-
         def conv(ch, k, stride=1, dilation=1, transpose=False):
-            """Make a convolution layer."""
-            layer_class = tfkl.Conv2DTranspose if transpose else tfkl.Conv2D
-            layer = layer_class(
-                ch,
-                (k, 1),
-                (stride, 1),
-                dilation_rate=(dilation, 1),
-                padding="same",
-                kernel_initializer=initializer,
-            )
-            if spectral_norm:
-                return tfa.layers.SpectralNormalization(layer)
-            else:
-                return layer
+            """Make a convolution block."""
 
-        # Layer Factories.
-        # def dilated_conv(i):
-        #     """Generates a dilated convolution layer, based on `i` depth in stack."""
-        #     if dilation > 0:
-        #         dilation_rate = int(dilation**i)
-        #     else:
-        #         # If dilation is negative, decrease dilation with depth instead of
-        #         # increasing.
-        #         dilation_rate = int((-dilation) ** (layers_per_stack - i - 1))
-        #     layer = tf.keras.Sequential(name="dilated_conv")
-        #     layer.add(tfkl.Activation(tf.nn.relu))
-        #     layer.add(conv(ch, kernel_size, 1, dilation_rate))
-        #     return layer
+            if stride == 1 and use_inverted_bottleneck:
+                block_class = InvertedBottleneckBlock
+            else:
+                block_class = BasicBlock
+
+            b = block_class(
+                ch,
+                kernel_size=k,
+                stride=stride,
+                dilation_rate=dilation,
+                transpose=transpose,
+            )
+
+            return b
 
         def resample_layer():
             """Generates a resampling layer."""
@@ -203,22 +216,11 @@ class DepthwiseDilatedConvStack(tfkl.Layer):
             # Convolve.
             for j in range(layers_per_stack):
                 # Convolution.
-                layer = DepthwiseDilatedConv1D(
-                    filters=ch,
-                    dilation_rate=int(dilation**j),
-                    expansion_rate=expansion_rate,
-                )
-                # Normalization / scale and shift.
-                if self.conditional:
-                    norm = ddsp.training.nn.ConditionalNorm(
-                        norm_type=norm_type, shift_only=shift_only
-                    )
-                else:
-                    norm = ddsp.training.nn.Normalize(norm_type=norm_type)
+                dilation_rate = int(dilation**j)
+                layer = conv(ch, kernel_size, stride=1, dilation=dilation_rate)
 
                 # Add to the stack.
                 self.layers.append(layer)
-                self.norms.append(norm)
 
             # Option: Resample after convolve.
             if (
@@ -240,19 +242,15 @@ class DepthwiseDilatedConvStack(tfkl.Layer):
     def call(self, inputs):
         """Forward pass."""
         # Get inputs.
-        if self.conditional:
-            x, z = inputs
-            x = ddsp.training.nn.ensure_4d(x)
-            z = ddsp.training.nn.ensure_4d(z)
-        else:
-            x = inputs
-            x = ddsp.training.nn.ensure_4d(x)
+        x = inputs
+        x = ddsp.training.nn.ensure_4d(x)
 
         # Run them through the network.
+        # print("SHAPE", x.shape)
         x = self.conv_in(x)
 
         # Stacks.
-        for i, (layer, norm) in enumerate(zip(self.layers, self.norms)):
+        for i, layer in enumerate(self.layers):
             with codetiming.Timer(f"dilated_cnn.layer_{i+1}", logger=None):
                 # Optional: Resample before conv.
                 if (
@@ -262,14 +260,7 @@ class DepthwiseDilatedConvStack(tfkl.Layer):
                 ):
                     x = self.resample_layers[i // self.layers_per_resample](x)
 
-                # Scale and shift by conditioning.
-                if self.conditional:
-                    y = layer(x)
-                    x += norm([y, z])
-
-                # Regular residual network.
-                else:
-                    x += norm(layer(x))
+                x += layer(x)
 
                 # Optional: Resample after conv.
                 if (

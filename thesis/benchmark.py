@@ -36,6 +36,7 @@ class BenchmarkedRuntime:
         self.runtime = runtime
         self.timer = Timer(logger=None)
         self.results = []
+        self.cpu_percent = None
 
     def run_batch(self, batch, loss_fn, true_output):
         # clear_cache()
@@ -51,7 +52,7 @@ class BenchmarkedRuntime:
 
         self.results.append(
             {
-                "cpu_percent": psutil.cpu_percent(),
+                # "cpu_percent": psutil.cpu_percent(),
                 "loss": cur_loss,
                 "inference_time_s": self.timer.last,
             }
@@ -117,6 +118,8 @@ def benchmark(keras_model, torch_model, runtimes, n_iterations=100):
     }
 
     for br in benchmarked_runtimes:
+        psutil.cpu_percent()  # Run once to initialize
+
         for i in range(n_iterations + 1):
             framework = (
                 "torch"
@@ -132,6 +135,8 @@ def benchmark(keras_model, torch_model, runtimes, n_iterations=100):
                 # The first runtime's output is considered to be the ground truth
                 true_outputs[framework][i] = output
 
+        br.cpu_percent = psutil.cpu_percent()
+
     all_runs = []
 
     for i, br in enumerate(benchmarked_runtimes):
@@ -143,6 +148,7 @@ def benchmark(keras_model, torch_model, runtimes, n_iterations=100):
                 {
                     "name": br.runtime.get_name(),
                     "iteration": j,
+                    "cpu_percent": br.cpu_percent,  # Broadcast cpu_percent to all batches
                     **br.results[j],
                 },
             )
@@ -398,7 +404,7 @@ if __name__ == "__main__":
     parser.add_argument("--n-iterations", type=int, default=50)
     parser.add_argument(
         "--kind",
-        choices=["dense", "inverted_bottleneck", "cnn", "dilated_cnn"],
+        choices=["dense", "inverted_bottleneck", "cnn", "dilated_cnn", "dilated_cnn_ib"],
         required=True,
     )
 

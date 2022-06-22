@@ -4,6 +4,7 @@ import tensorflow as tf
 import torch
 
 import ddsp.training
+import thesis.dilated_conv
 
 
 def dense_models(n_sizes=8, n_layers=1):
@@ -189,16 +190,21 @@ def inverted_bottleneck_models(n_sizes=10, expansion=6):
         }
 
 
-def dilated_conv_models(n_sizes, n_layers):
+def dilated_conv_models(n_sizes, n_layers, use_inverted_bottleneck=False):
 
     for size in range(n_sizes):
         channels = 64 * 2**size
-        model = ddsp.training.nn.DilatedConvStack(
+
+        if use_inverted_bottleneck:
+            channels //= 2
+
+        model = thesis.dilated_conv.DilatedConvStack(
             ch=channels,
             layers_per_stack=n_layers,
             stacks=1,
             kernel_size=3,
             dilation=2,
+            use_inverted_bottleneck=use_inverted_bottleneck,
         )
 
         model = tf.keras.Sequential(
@@ -221,6 +227,10 @@ def get_models(kind, n_sizes, n_layers=1):
         models = cnn_models(n_sizes=n_sizes, n_layers=n_layers)
     elif kind == "dilated_cnn":
         models = dilated_conv_models(n_sizes=n_sizes, n_layers=n_layers)
+    elif kind == "dilated_cnn_ib":
+        models = dilated_conv_models(
+            n_sizes=n_sizes, n_layers=n_layers, use_inverted_bottleneck=True
+        )
     else:
         raise ValueError("Unknown kind")
 
