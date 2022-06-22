@@ -28,7 +28,7 @@ class TVM(ONNXRuntime):
 
         self.mod, self.params = relay.frontend.from_onnx(onnx_model, shape_dict)
 
-        target = "llvm -mcpu=haswell"
+        target = "llvm -mcpu=skylake"
 
         # opt_level=3 is the maximum
         with tvm.transform.PassContext(opt_level=3):

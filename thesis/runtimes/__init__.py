@@ -30,6 +30,10 @@ from .deepsparse import DeepSparse
 def get_runtimes(good_only=True, unsigned_weights=False, is_conv=True):
     runtimes = [
         (False, TensorFlow()),
+        (True, DeepSparse(quantization_mode="off")),
+        (True, DeepSparse(quantization_mode="static")),
+        (True, DeepSparse(quantization_mode="off", sparsity=0.9)),
+        (True, DeepSparse(quantization_mode="static", sparsity=0.9)),
         (True, TVM(quantization_mode="off")),
         # For dense we get an error:
         # tvm.error.OpNotImplemented: The following operators are not supported for frontend ONNX: MatMulInteger
@@ -44,12 +48,6 @@ def get_runtimes(good_only=True, unsigned_weights=False, is_conv=True):
         # (True, TFLite(quantization_mode="off", sparsity=0.9)),
         # (not is_conv, TFLite(sparsity=0.9, quantization_mode="dynamic")),  # bad for CNN
         # (not is_conv, TFLite(sparsity=0.9, quantization_mode="static")),  # bad for CNN
-        # (True, TFLite(quantization_mode="off", sparsity=0.99)),
-        # (
-        #     not is_conv,
-        #     TFLite(sparsity=0.99, quantization_mode="dynamic"),
-        # ),  # bad for CNN
-        # (not is_conv, TFLite(sparsity=0.99, quantization_mode="static")),  # bad for CNN
         (True, ONNXRuntime(quantization_mode="off")),
         (
             True,
@@ -74,17 +72,13 @@ def get_runtimes(good_only=True, unsigned_weights=False, is_conv=True):
             OpenVINO(quantization_mode="dynamic", unsigned_weights=unsigned_weights),
         ),  # bad
         (True, OpenVINO(quantization_mode="static_qdq")),
-        (True, DeepSparse(quantization_mode="off")),
     ]
 
     # runtimes = [
     #     (True, DeepSparse(quantization_mode="off")),
-    #     # (True, DeepSparse(quantization_mode="static_qdq")),
-    #     # (True, DeepSparse(quantization_mode="static_qoperator")),
-    #     # (
-    #     #     True,
-    #     #     DeepSparse(quantization_mode="dynamic", unsigned_weights=unsigned_weights),
-    #     # ),
+    #     (True, DeepSparse(quantization_mode="static")),
+    #     (True, DeepSparse(quantization_mode="off", sparsity=0.9)),
+    #     (True, DeepSparse(quantization_mode="static", sparsity=0.9)),
     # ]
 
     # runtimes = [
