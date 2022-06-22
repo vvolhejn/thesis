@@ -24,14 +24,6 @@
           </excludedPaths>
         </serverdata>
       </paths>
-      <paths name="n1-west1-1">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/home/vaclav/ddsp" local="$PROJECT_DIR$/../ddsp" web="/" />
-            <mapping deploy="/home/vaclav/thesis" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
       <paths name="vaclav@192.168.2.139:22">
         <serverdata>
           <mappings>

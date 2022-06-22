@@ -19,3 +19,4 @@ tensorflow-model-optimization~=0.7
 onnxruntime~=1.11
 tensorflow>=2; sys_platform != 'darwin' or platform_machine != 'arm64'
 tensorflow-macos>=2; sys_platform == 'darwin' and platform_machine == 'arm64'
+sparseml>=0.12
