@@ -17,9 +17,10 @@ modifiers:
         update_frequency: 1.0
         init_sparsity: 0.05
         final_sparsity: 0.9
-        mask_type: unstructured
+        mask_type: [1, 4]
 #        params: ['sections.0.0.conv1.weight', 'sections.0.0.conv2.weight', 'sections.0.0.conv3.weight']
-        params:  __ALL__
+#        params:  __ALL__
+        params: ['0.weight', '4.weight']
 
     - !QuantizationModifier
         start_epoch: 0.0
