@@ -69,19 +69,30 @@ class TFLite(Runtime):
         self.signature = interpreter.get_signature_runner()
 
     def prune(self):
-        is_conv = False
+        contains_conv = False
         for layer in self.orig_model.layers:
-            if isinstance(layer, tf.keras.layers.Conv2D):
-                is_conv = True
+            if isinstance(
+                layer,
+                (
+                    tf.keras.layers.Conv2D,
+                    tf.keras.layers.DepthwiseConv2D,
+                    tf.keras.layers.Conv2DTranspose,
+                ),
+            ):
+                contains_conv = True
 
         model_for_pruning = tfmot.sparsity.keras.prune_low_magnitude(
             # We have to clone the model, otherwise the original weights are modified
             tf.keras.models.clone_model(self.orig_model),
             pruning_schedule=tfmot.sparsity.keras.ConstantSparsity(
-                self.sparsity, begin_step=0
+                self.sparsity, begin_step=0, frequency=1,
             ),
-            # block_size=(1, 1) if is_conv else (1, 16),
+            # see https://github.com/tensorflow/model-optimization/issues/634
+            block_size=(1, 1) if contains_conv else (1, 16),
         )
+        if not contains_conv:
+            print("Using block pruning because model contains no conv layers.")
+
         callbacks = [
             tfmot.sparsity.keras.UpdatePruningStep(),
         ]
@@ -92,7 +103,10 @@ class TFLite(Runtime):
             metrics=["accuracy"],
         )
 
-        n_samples = 100
+        # Make sure to run for enough steps:
+        # https://github.com/tensorflow/model-optimization/issues/973
+        n_samples = 5
+
         input_shape = [n_samples] + list(self.orig_model.input.shape)[1:]
         output_shape = [n_samples] + list(self.orig_model.output.shape)[1:]
 
@@ -101,8 +115,6 @@ class TFLite(Runtime):
             np.random.randn(*output_shape).astype(np.float32),
             callbacks=callbacks,
             epochs=2,
-            # larger batch size misbihaves:
-            # https://github.com/tensorflow/model-optimization/issues/973
             batch_size=1,
             # validation_split=0.1,
             verbose=0,

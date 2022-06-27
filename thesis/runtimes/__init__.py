@@ -35,16 +35,19 @@ def get_runtimes(good_only=True, unsigned_weights=False, is_conv=True):
         (True, DeepSparse(quantization_mode="off", sparsity=0.9)),
         (True, DeepSparse(quantization_mode="static", sparsity=0.9)),
         (True, TVM(quantization_mode="off")),
-        # For dense we get an error:
+        # Running TVM with dynamic quantization on dense models, we get an error:
         # tvm.error.OpNotImplemented: The following operators are not supported for frontend ONNX: MatMulInteger
-        (True, TVM(quantization_mode="static_qdq")),
         (is_conv, TVM(quantization_mode="dynamic", unsigned_weights=unsigned_weights)),
+        (True, TVM(quantization_mode="static_qdq")),
+        # TVM with quantization (both static and dynamic) apparently can't use pruning
+        (True, TVM(quantization_mode="off", sparsity=0.9)),
         (True, PyTorch(quantization_mode="off", use_torchscript=True)),
         (True, PyTorch(quantization_mode="dynamic", use_torchscript=True)),
         (True, PyTorch(quantization_mode="static", use_torchscript=True)),
         (True, TFLite(quantization_mode="off")),
         (not is_conv, TFLite(quantization_mode="dynamic")),  # bad for CNN
         (not is_conv, TFLite(quantization_mode="static")),  # bad for CNN
+        # TFLite sparsity doesn't lead to speedups
         # (True, TFLite(quantization_mode="off", sparsity=0.9)),
         # (not is_conv, TFLite(sparsity=0.9, quantization_mode="dynamic")),  # bad for CNN
         # (not is_conv, TFLite(sparsity=0.9, quantization_mode="static")),  # bad for CNN
@@ -55,17 +58,6 @@ def get_runtimes(good_only=True, unsigned_weights=False, is_conv=True):
         ),
         (False, ONNXRuntime(quantization_mode="static_qoperator")),  # bad
         (True, ONNXRuntime(quantization_mode="static_qdq")),
-        (False, ONNXRuntimeFromPyTorch(quantization_mode="off")),
-        (
-            False,
-            ONNXRuntimeFromPyTorch(
-                quantization_mode="dynamic", unsigned_weights=unsigned_weights
-            ),
-        ),
-        (False, ONNXRuntimeFromPyTorch(quantization_mode="static_qoperator")),  # bad
-        (False, ONNXRuntimeFromPyTorch(quantization_mode="static_qdq")),
-        #
-        #
         (True, OpenVINO(quantization_mode="off")),
         (
             False,
@@ -75,19 +67,20 @@ def get_runtimes(good_only=True, unsigned_weights=False, is_conv=True):
     ]
 
     # runtimes = [
-    #     (True, DeepSparse(quantization_mode="off")),
-    #     (True, DeepSparse(quantization_mode="static")),
-    #     (True, DeepSparse(quantization_mode="off", sparsity=0.9)),
-    #     (True, DeepSparse(quantization_mode="static", sparsity=0.9)),
-    # ]
-
-    # runtimes = [
-    #     (True, PyTorch(quantization_mode="off", use_torchscript=True))
-    # ]
-
-    # runtimes = [
-    #     (True, ONNXRuntime(quantization_mode="off")),
     #     (True, TVM(quantization_mode="off")),
+    #     (
+    #         True,
+    #         TVM(
+    #             quantization_mode="off",
+    #             tuning_records_path="/home/vaclav/benchmark_data/tuning_test_100_1cores.json",
+    #         ),
+    #     ),
+    # ]
+
+    # runtimes = [
+    #     (True, PyTorch(quantization_mode="off", use_torchscript=True)),
+    #     (True, PyTorch(quantization_mode="dynamic", use_torchscript=True)),
+    #     (True, PyTorch(quantization_mode="static", use_torchscript=True)),
     # ]
 
     # should be possible but doesn't work: OpenVINO(quantization_mode="static_qoperator")

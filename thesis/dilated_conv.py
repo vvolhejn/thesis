@@ -9,11 +9,12 @@ import ddsp.training
 
 def InvertedBottleneckBlock(
     filters,
-    kernel_size,
-    dilation_rate,
+    kernel_size=3,
+    dilation_rate=1,
     expansion_rate=4,
     transpose=False,
     stride=1,  # **kwargs
+    batch_norm=True,
 ):
     """
     Expects input of shape [batch, time, 1, in_channels]
@@ -30,6 +31,19 @@ def InvertedBottleneckBlock(
     )
 
     channel_axis = 1 if backend.image_data_format() == "channels_first" else -1
+    assert channel_axis == -1  # To use dense layers as conv2d layers
+
+    def maybe_batch_norm():
+        if batch_norm:
+            return [
+                tfkl.BatchNormalization(
+                    axis=channel_axis,
+                    epsilon=1e-3,
+                    momentum=0.999,
+                )
+            ]
+        else:
+            return []
 
     return tf.keras.Sequential(
         [
@@ -39,13 +53,16 @@ def InvertedBottleneckBlock(
                 kernel_size=1,
                 padding="same",
                 use_bias=False,
-                # **kwargs,
             ),
-            tfkl.BatchNormalization(
-                axis=channel_axis,
-                epsilon=1e-3,
-                momentum=0.999,
-            ),
+            # tfkl.Dense layers only operate on the last dimension; they are equivalent
+            # to 1x1 convolutions under the BHWC data layout.
+            # tfkl.Dense(
+            #     expansion_rate * filters,
+            #     use_bias=False,
+            # )
+        ]
+        + maybe_batch_norm()
+        + [
             tfkl.Activation(tf.nn.relu6),
             # Depthwise 3x3 convolution.
             tfkl.DepthwiseConv2D(
@@ -56,11 +73,9 @@ def InvertedBottleneckBlock(
                 dilation_rate=(dilation_rate, 1),
                 # **kwargs,
             ),
-            tfkl.BatchNormalization(
-                axis=channel_axis,
-                epsilon=1e-3,
-                momentum=0.999,
-            ),
+        ]
+        + maybe_batch_norm()
+        + [
             tfkl.Activation(tf.nn.relu6),
             # Project with a pointwise 1x1 convolution.
             tfkl.Conv2D(
@@ -71,15 +86,19 @@ def InvertedBottleneckBlock(
                 activation=None,
                 # **kwargs,
             ),
-            tfkl.BatchNormalization(axis=channel_axis, epsilon=1e-3, momentum=0.999),
+            # tfkl.Dense(
+            #     filters,
+            #     use_bias=False,
+            # )
         ]
+        + maybe_batch_norm()
     )
 
 
 def BasicBlock(
     filters,
-    kernel_size,
-    dilation_rate,
+    kernel_size=3,
+    dilation_rate=1,
     stride=1,
     transpose=False,
     **kwargs,

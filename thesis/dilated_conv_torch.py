@@ -12,56 +12,71 @@ import ddsp.training
 
 def InvertedBottleneckBlock(
     filters,
-    kernel_size,
-    dilation_rate,
+    kernel_size=3,
+    dilation_rate=1,
     expansion_rate=4,
     in_filters=None,
+    batch_norm=True,
     **kwargs,  # For `transpose` and `stride`
 ):
     channels = filters
     expanded_channels = filters * expansion_rate
     in_filters = in_filters or filters
 
-    return torch.nn.Sequential(
-        torch.nn.Conv2d(
-            in_channels=in_filters,
-            out_channels=expanded_channels,
-            kernel_size=1,
-            bias=False,
-        ),
-        torch.nn.BatchNorm2d(
-            num_features=expanded_channels, eps=1e-3, momentum=1 - 0.999
-        ),
-        torch.nn.ReLU6(),
-        torch.nn.Conv2d(
-            in_channels=expanded_channels,
-            out_channels=expanded_channels,
-            groups=expanded_channels,  # Make it depthwise
-            kernel_size=(kernel_size, 1),
-            # Torch quantization doesn't recognize padding="same", so we need to
-            # explicitly pass a tuple
-            padding=(dilation_rate, 0),
-            dilation=(dilation_rate, 1),
-            bias=False,
-        ),
-        torch.nn.BatchNorm2d(
-            num_features=expanded_channels, eps=1e-3, momentum=1 - 0.999
-        ),
-        torch.nn.ReLU6(),
-        torch.nn.Conv2d(
-            in_channels=expanded_channels,
-            out_channels=channels,
-            kernel_size=1,
-            bias=False,
-        ),
-        torch.nn.BatchNorm2d(num_features=channels, eps=1e-3, momentum=1 - 0.999),
+    def maybe_batch_norm(channels):
+        if batch_norm:
+            return [
+                torch.nn.BatchNorm2d(
+                    num_features=channels, eps=1e-3, momentum=1 - 0.999
+                ),
+            ]
+        else:
+            return []
+
+    layers = (
+        [
+            torch.nn.Conv2d(
+                in_channels=in_filters,
+                out_channels=expanded_channels,
+                kernel_size=1,
+                bias=False,
+            ),
+        ]
+        + maybe_batch_norm(expanded_channels)
+        + [
+            torch.nn.ReLU6(),
+            torch.nn.Conv2d(
+                in_channels=expanded_channels,
+                out_channels=expanded_channels,
+                groups=expanded_channels,  # Make it depthwise
+                kernel_size=(kernel_size, 1),
+                # Torch quantization doesn't recognize padding="same", so we need to
+                # explicitly pass a tuple
+                padding=(dilation_rate, 0),
+                dilation=(dilation_rate, 1),
+                bias=False,
+            ),
+        ]
+        + maybe_batch_norm(expanded_channels)
+        + [
+            torch.nn.ReLU6(),
+            torch.nn.Conv2d(
+                in_channels=expanded_channels,
+                out_channels=channels,
+                kernel_size=1,
+                bias=False,
+            ),
+        ]
+        + maybe_batch_norm(channels)
     )
+
+    return torch.nn.Sequential(*layers)
 
 
 def BasicBlock(
     filters,
-    kernel_size,
-    dilation_rate,
+    kernel_size=3,
+    dilation_rate=1,
     stride=1,
     transpose=False,
     in_filters=None,
@@ -109,6 +124,10 @@ class DilatedConvStack(torch.nn.Module):
         for documentation.
         """
         super().__init__()
+
+        # Needed for residual connections in quantized model
+        self.float_functional = torch.nn.quantized.FloatFunctional()
+
         self.resample_after_convolve = resample_after_convolve
 
         def conv(ch, k, stride=1, dilation=1, in_ch=None, transpose=False):
@@ -194,10 +213,6 @@ class DilatedConvStack(torch.nn.Module):
 
         # Run them through the network.
         x = self.conv_in(x)
-        # print(x.shape)
-        # print(torch.all(x[0,:,:100,0] == 0, dim=1))
-
-        # return x[:, :, :, 0]  # Convert back to 3-D.
 
         # Stacks.
         for i, layer in enumerate(self.layers):
@@ -210,11 +225,11 @@ class DilatedConvStack(torch.nn.Module):
                 ):
                     x = self.resample_layers[i // self.layers_per_resample](x)
 
-                x += layer(x)
-                # print(x.sum())
-                # print(torch.any(x[0, :, :100, 0] == 0, dim=1))
-
-                # return x[:, :, :, 0]  # Convert back to 3-D.
+                # Interestingly, `x += y` and `x = x + y` is not the same thing in PyTorch:
+                # https://discuss.pytorch.org/t/what-is-in-place-operation/16244/7
+                # Also, regular addition breaks quantization:
+                # https://discuss.pytorch.org/t/could-not-run-aten-add-tensor-with-arguments-from-the-quantizedcpu-backend/121268/2
+                x = self.float_functional.add(x, layer(x))
 
                 # Optional: Resample after conv.
                 if (

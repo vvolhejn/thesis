@@ -5,6 +5,7 @@ import torch
 
 import ddsp.training
 import thesis.dilated_conv
+import thesis.dilated_conv_torch
 
 
 def dense_models(n_sizes=8, n_layers=1):
@@ -88,73 +89,6 @@ def cnn_models(n_sizes=10, n_layers=1):
         yield cnn_keras, cnn_torch, {"n_channels": n_channels, "n_layers": n_layers}
 
 
-def keras_inverted_bottleneck(channels, expansion, resolution):
-    """
-    Note that batchnorm is omitted since this is meant for inference only,
-    where BN would get folded into the conv layers anyway.
-    """
-    return tf.keras.Sequential(
-        [
-            tf.keras.Input(shape=(resolution, resolution, channels)),
-            # Expand with a pointwise 1x1 convolution.
-            tf.keras.layers.Conv2D(
-                expansion * channels,
-                kernel_size=1,
-                padding="same",
-                use_bias=False,
-                activation="relu6",
-            ),
-            # Depthwise 3x3 convolution.
-            tf.keras.layers.DepthwiseConv2D(
-                # no channels argument since this is a depthwise conv
-                kernel_size=3,
-                padding="same",
-                use_bias=False,
-                activation="relu6",
-            ),
-            # Project with a pointwise 1x1 convolution.
-            tf.keras.layers.Conv2D(
-                channels,
-                kernel_size=1,
-                padding="same",
-                use_bias=False,
-                activation=None,
-            ),
-        ]
-    )
-
-
-def torch_inverted_bottleneck(channels, expansion):
-    expanded_channels = round(channels * expansion)
-
-    return torch.nn.Sequential(
-        torch.nn.Conv2d(
-            in_channels=channels,
-            out_channels=expanded_channels,
-            kernel_size=1,
-            bias=False,
-        ),
-        torch.nn.ReLU6(),
-        torch.nn.Conv2d(
-            in_channels=expanded_channels,
-            out_channels=expanded_channels,
-            groups=expanded_channels,  # Make it depthwise
-            kernel_size=3,
-            # Torch quantization doesn't recognize padding="same", so we need to
-            # explicitly pass a tuple
-            padding=[1, 1],
-            bias=False,
-        ),
-        torch.nn.ReLU6(),
-        torch.nn.Conv2d(
-            in_channels=expanded_channels,
-            out_channels=channels,
-            kernel_size=1,
-            bias=False,
-        ),
-    )
-
-
 def inverted_bottleneck_models(n_sizes=10, expansion=6):
     """
     The MobileNet inverted bottleneck block.
@@ -175,13 +109,28 @@ def inverted_bottleneck_models(n_sizes=10, expansion=6):
     resolution_base = 14
     channels_base = 160
 
+    block_size = 4
+
     for i in range(n_sizes):
         channels = math.ceil(channels_base * channels_coef**i)
+        # For block sparsity, TVM requires that the number of channels be a multiple
+        # of the block size
+        channels = math.ceil(channels / block_size) * block_size
+
         resolution = math.ceil(resolution_base * resolution_coef**i)
 
-        model_keras = keras_inverted_bottleneck(channels, expansion, resolution)
+        model_keras = tf.keras.Sequential(
+            [
+                tf.keras.Input(shape=(resolution, resolution, channels)),
+                thesis.dilated_conv.InvertedBottleneckBlock(
+                    filters=channels, expansion_rate=expansion, batch_norm=False
+                ),
+            ]
+        )
 
-        model_torch = torch_inverted_bottleneck(channels, expansion)
+        model_torch = thesis.dilated_conv_torch.InvertedBottleneckBlock(
+            filters=channels, expansion_rate=expansion, batch_norm=False,
+        )
 
         yield model_keras, model_torch, {
             "channels": channels,
@@ -193,12 +142,12 @@ def inverted_bottleneck_models(n_sizes=10, expansion=6):
 def dilated_conv_models(n_sizes, n_layers, use_inverted_bottleneck=False):
 
     for size in range(n_sizes):
-        channels = 64 * 2**size
+        channels = 64 * (size + 1)
 
         if use_inverted_bottleneck:
             channels //= 2
 
-        model = thesis.dilated_conv.DilatedConvStack(
+        model_keras = thesis.dilated_conv.DilatedConvStack(
             ch=channels,
             layers_per_stack=n_layers,
             stacks=1,
@@ -207,14 +156,24 @@ def dilated_conv_models(n_sizes, n_layers, use_inverted_bottleneck=False):
             use_inverted_bottleneck=use_inverted_bottleneck,
         )
 
-        model = tf.keras.Sequential(
+        model_keras = tf.keras.Sequential(
             [
                 tf.keras.layers.Input((64000, 1, 1)),
-                model,
+                model_keras,
             ]
         )
 
-        yield model, None, {"n_channels": channels, "n_layers": n_layers}
+        model_torch = thesis.dilated_conv_torch.DilatedConvStack(
+            ch=channels,
+            layers_per_stack=n_layers,
+            stacks=1,
+            kernel_size=3,
+            dilation=2,
+            use_inverted_bottleneck=use_inverted_bottleneck,
+            in_ch=1,  # Need to manually specify #input channels for Torch
+        )
+
+        yield model_keras, model_torch, {"n_channels": channels, "n_layers": n_layers}
 
 
 def get_models(kind, n_sizes, n_layers=1):

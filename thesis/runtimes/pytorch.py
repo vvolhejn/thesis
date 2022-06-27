@@ -35,7 +35,7 @@ class PyTorch(Runtime, NeedsPyTorchModel):
             # Prepare for calibration
             model = torch.quantization.prepare(model)
 
-            for i in range(100):
+            for i in range(3):
                 data = torch.from_numpy(get_batch_fn())
                 model(data)
 
@@ -44,6 +44,11 @@ class PyTorch(Runtime, NeedsPyTorchModel):
         if self.use_torchscript:
             data = torch.from_numpy(get_batch_fn())
             self.model = torch.jit.trace(self.model, data)
+
+        # Setting the threads to the number of *logical* CPUs is not a good idea:
+        # https://pytorch.org/tutorials/intermediate/torchserve_with_ipex.html
+        # Instead, the Torch default uses the number of *physical* CPUs
+        # torch.set_num_threads(util.get_n_cpus_available())
 
     def run(self, data):
         super().run(data)

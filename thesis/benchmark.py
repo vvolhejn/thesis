@@ -81,10 +81,10 @@ def benchmark(keras_model, torch_model, runtimes, n_iterations=100):
     if len(keras_input_shape) == 4:
         b, h, w, c = keras_input_shape
         torch_input_shape = [b, c, h, w]
-        print(
-            f"4D input detected -> reordering torch input shape from "
-            f"{keras_input_shape} to {torch_input_shape}"
-        )
+        # print(
+        #     f"4D input detected -> reordering torch input shape from "
+        #     f"{keras_input_shape} to {torch_input_shape}"
+        # )
     else:
         torch_input_shape = keras_input_shape
 
@@ -92,8 +92,10 @@ def benchmark(keras_model, torch_model, runtimes, n_iterations=100):
         return np.random.randn(*torch_input_shape).astype(np.float32)
 
     benchmarked_runtimes = []
-    for runtime in runtimes:
-        print(f"Converting model to runtime {runtime.get_id()}")
+    for i, runtime in enumerate(runtimes):
+        # The first runtime is the base to compare to, so don't print it
+        if i != 0:
+            print(f"Converting model to runtime {runtime.get_id()}")
 
         is_torch_model = isinstance(runtime, thesis.runtimes.NeedsPyTorchModel)
         orig_model = torch_model if is_torch_model else keras_model
@@ -276,7 +278,7 @@ def benchmark_one_runtime(runtime_fn, models, n_iterations):
 
         for k, v in metadata.items():
             runs[k] = v
-        runs["flop/s"] = flops / runs["inference_time_s_mean"]
+        runs["flop_per_s"] = flops / runs["inference_time_s_mean"]
         # runs["name"] = cur_runtime.get_name()
 
         runs_per_size.append(runs)
