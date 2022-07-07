@@ -1,0 +1,125 @@
+# -*-Python-*-
+# Decodes from (loudness, f0). Has a trainable reverb component as well.
+# Uses a RAVE-style decoder based on CNNs, decodes directly to the waveform
+# (doesn't use harmonics+noise) like DDSP
+
+#include 'models/ae.gin'
+import thesis.rave
+import thesis.pqmf
+
+sample_rate = 16000
+# in fullrave, n_samples must be a multiple of product(ratios) = 256
+n_samples = 64000
+
+# Constant values here: https://github.com/caillonantoine/RAVE/blob/1.0/train_rave.py
+n_bands = 16  # because DATA_SIZE = 16
+# LATENT_SIZE = 128 (the input to the network)
+# CAPACITY = 64 (the output of the network. Each subsampling layer doubles the #samples and halves the hidden size,
+# reaching the hidden size CAPACITY in the end.
+# So there is no one equivalent value of `ch`.
+decoder_output_channels = 128
+
+get_model.model = @models.Autoencoder()
+
+
+# Preprocessor
+Autoencoder.preprocessor = @preprocessing.JukeboxPreprocessor()
+Autoencoder.encoder = None
+Autoencoder.decoder = @decoders.DilatedConvDecoder()
+
+DilatedConvDecoder:
+    ch = %decoder_output_channels
+    layers_per_stack = 3  # Hardcoded in RAVE
+    kernel_size = 3  # Hardcoded in RAVE
+    dilation = 3
+
+#    norm_type = 'batch'
+    norm_type = "layer"
+
+    input_keys = ('jukebox_embeddings_2',)
+
+    # RATIOS = [4, 4, 4, 2] meaning there's 4 stacks, upsampling with a ratio of 4x4x4x2=128
+    # Temporary: the f0 signal is at 250 Hz and we need 1kHz = 16kHz / 16 bands,
+    # so we set stacks=2, resample_stride=2.
+    stacks = 3
+    resample_stride = 2
+
+    conditioning_keys = None  # Nothing else than a latent, so no need to consider this separately
+    precondition_stack = None  # Not relevant since `conditioning_keys = None`
+
+    output_splits = (('control_embedding', %decoder_output_channels),)
+    # RAVE uses this (resamples *before* convolution), though it has one extra layer before the first resampling
+    resample_after_convolve = False
+
+# ---------------------
+#https://github.com/ben-hayes/neural-waveshaping-synthesis/blob/main/neural_waveshaping_synthesis/models/neural_waveshaping.py#L30
+
+# Losses
+Autoencoder.losses = [
+    @losses.SpectralLoss(),
+]
+SpectralLoss.loss_type = 'L1'
+SpectralLoss.mag_weight = 1.0
+SpectralLoss.logmag_weight = 1.0
+SpectralLoss.max_random_crop = 512
+
+# ==============
+# ProcessorGroup
+# ==============
+Autoencoder.processor_group = @processors.ProcessorGroup()
+
+ProcessorGroup.dag = [
+  (@processors.Crop(),
+    ['control_embedding']),
+  (@RAVEWaveformGenerator(),
+    ['crop/signal']),
+  (@RAVEDownsamplingCNN(),
+    ['control_embedding']),
+  (@MultibandFilteredNoise(),
+    ['rave_downsampling_cnn/signal']),
+  (@processors.Add(),
+    ['multiband_filtered_noise/signal', 'rave_waveform_generator/signal']),
+  (@PQMFSynthesis(),
+    ['add/signal']),
+#  (@effects.Reverb(),
+#    ['pqmf_synthesis/signal']),
+]
+
+# Reverb
+Reverb:
+    name = 'reverb'
+    reverb_length = 48000
+    trainable = True
+
+PQMFBank:
+    attenuation = 100
+    n_bands = %n_bands
+
+PQMFSynthesis:
+    pqmf_bank = @PQMFBank()
+
+RAVEWaveformGenerator:
+    n_bands = %n_bands
+    n_samples = %n_samples
+
+RAVEDownsamplingCNN:
+    ch = 128
+    n_layers = 3
+    downsample_per_layer = 4
+    n_bands = %n_bands
+    n_noise_bands = 5
+
+MultibandFilteredNoise:
+    n_bands = %n_bands
+    n_samples = %n_samples
+
+# Here dummy, but useful in fullrave
+Crop:
+    frame_size = 0
+    crop_location = 'back'
+
+train_util.train.model_specific_summary_fn = @summarize_rave
+
+TFRecordProvider.with_jukebox = True
+TFRecordProvider.centered = True
+TFRecordProvider.frame_rate = 50

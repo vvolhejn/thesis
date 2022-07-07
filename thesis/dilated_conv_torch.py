@@ -17,11 +17,15 @@ def InvertedBottleneckBlock(
     expansion_rate=4,
     in_filters=None,
     batch_norm=True,
+    is_1d=True,
     **kwargs,  # For `transpose` and `stride`
 ):
     channels = filters
     expanded_channels = filters * expansion_rate
     in_filters = in_filters or filters
+
+    if not is_1d:
+        assert dilation_rate == 1
 
     def maybe_batch_norm(channels):
         if batch_norm:
@@ -49,11 +53,11 @@ def InvertedBottleneckBlock(
                 in_channels=expanded_channels,
                 out_channels=expanded_channels,
                 groups=expanded_channels,  # Make it depthwise
-                kernel_size=(kernel_size, 1),
+                kernel_size=(kernel_size, 1) if is_1d else kernel_size,
                 # Torch quantization doesn't recognize padding="same", so we need to
                 # explicitly pass a tuple
-                padding=(dilation_rate, 0),
-                dilation=(dilation_rate, 1),
+                padding=(dilation_rate, 0) if is_1d else dilation_rate,
+                dilation=(dilation_rate, 1) if is_1d else dilation_rate,
                 bias=False,
             ),
         ]

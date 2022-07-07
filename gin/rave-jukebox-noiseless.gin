@@ -1,0 +1,25 @@
+# -*-Python-*-
+
+include 'rave-jukebox.gin'
+#include 'fullrave.gin'
+#import thesis.rave
+#import thesis.pqmf
+#import thesis.vae
+
+DilatedConvDecoder:
+    ch = 256
+    layers_per_stack = 5
+
+# No noise generator.
+ProcessorGroup.dag = [
+  (@processors.Crop(),
+    ['control_embedding']),
+  (@RAVEWaveformGenerator(),
+    ['crop/signal']),
+  (@PQMFSynthesis(),
+    ['rave_waveform_generator/signal']),
+]
+
+
+# No more noise generator to show
+train_util.train.model_specific_summary_fn = @thesis.util.summarize_generic

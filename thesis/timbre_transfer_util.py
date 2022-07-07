@@ -8,7 +8,7 @@ from absl import logging
 import librosa
 import numpy as np
 import ddsp.training
-from ddsp.colab.colab_utils import auto_tune, get_tuning_factor
+import tensorflow as tf
 
 
 def adjust_batch(
@@ -17,6 +17,7 @@ def adjust_batch(
     autotune_factor=0.0,
     suppress_off_notes_db=20,
     note_detection_threshold=1.0,
+    lufs_normalization=None,
 ):
     """
     :param audio_features: a dictionary of audio features (a batch).
@@ -28,6 +29,9 @@ def adjust_batch(
     :param suppress_off_notes_db: Make parts without notes detected quieter by this much.
     :param note_detection_threshold: A higher threshold turns more parts off.
         Between 0 and 2 is reasonable.
+    :param lufs_normalization: If sets, normalizes the audio volume to the given dB LUFS
+        instead of using quantile transforms.
+        A reasonable value is -14, which is what Spotify uses.
     :return: An adjusted version of `audio_features`.
     """
     assert {"loudness_db", "f0_hz", "f0_confidence"}.issubset(audio_features.keys())
@@ -65,6 +69,7 @@ def adjust_batch(
             autotune_factor,
             suppress_off_notes_db,
             note_detection_threshold,
+            lufs_normalization,
         )
 
         for k, v in audio_features_one_mod.items():
@@ -79,6 +84,7 @@ def adjust_one(
     autotune_factor=0.0,
     suppress_off_notes_db=20,
     note_detection_threshold=1.0,
+    lufs_normalization=None,
 ):
     """An unbatched variant of `adjust_batch`."""
     audio_features_mod = {k: v.copy() for k, v in audio_features.items()}
@@ -94,6 +100,8 @@ def adjust_one(
         logging.warning("No notes detected by adjust_one(), not adjusting")
         return audio_features_mod
 
+    audio_features_mod["mask_on"] = mask_on
+
     # Shift the pitch register.
     target_mean_pitch = dataset_stats["mean_pitch"]
     pitch = ddsp.core.hz_to_midi(audio_features["f0_hz"])
@@ -104,25 +112,44 @@ def adjust_one(
     p_diff_octave = round_fn(p_diff_octave)
     audio_features_mod = shift_f0(audio_features_mod, p_diff_octave)
 
-    # Quantile shift the note_on parts.
-    _, loudness_norm = ddsp.training.postprocessing.fit_quantile_transform(
-        audio_features["loudness_db"],
-        mask_on,
-        inv_quantile=dataset_stats["quantile_transform"],
-    )
+    if lufs_normalization is None:
+        # Quantile shift the note_on parts.
+        _, loudness_norm = ddsp.training.postprocessing.fit_quantile_transform(
+            audio_features["loudness_db"],
+            mask_on,
+            inv_quantile=dataset_stats["quantile_transform"],
+        )
 
-    # Turn down the note_off parts.
-    mask_off = np.logical_not(mask_on)
-    loudness_norm[mask_off] -= suppress_off_notes_db * (
-        1.0 - note_on_value[mask_off][:, np.newaxis]
-    )
-    loudness_norm = np.reshape(loudness_norm, audio_features["loudness_db"].shape)
+        # Turn down the note_off parts.
+        mask_off = np.logical_not(mask_on)
+        loudness_norm[mask_off] -= suppress_off_notes_db * (
+            1.0 - note_on_value[mask_off][:, np.newaxis]
+        )
+        loudness_norm = np.reshape(loudness_norm, audio_features["loudness_db"].shape)
+        audio_features_mod["loudness_db"] = loudness_norm
+    else:
+        assert lufs_normalization <= 0
 
-    audio_features_mod["loudness_db"] = loudness_norm
-    audio_features_mod["mask_on"] = mask_on
+        actual_lufs = get_lufs(audio_features["audio_16k"], sample_rate=16000)
+        target_lufs = lufs_normalization
+        audio_features_mod["loudness_db"] += target_lufs - actual_lufs
+
+        normalized_audio = normalize_lufs(
+            audio_features["audio_16k"],
+            16000,
+            target_lufs=target_lufs,
+            actual_lufs=actual_lufs,
+        )
+        audio_features_mod["audio_16k"] = tf.convert_to_tensor(normalized_audio)
+        # This will not work for sampling rates other than 16000
+        audio_features_mod["audio"] = tf.convert_to_tensor(normalized_audio)
+
+        logging.info(f"Loudness adjusted from {actual_lufs} dB LUFS to {target_lufs}.")
 
     # Auto-tune.
     if autotune_factor:
+        from ddsp.colab.colab_utils import auto_tune, get_tuning_factor
+
         f0_midi = np.array(ddsp.core.hz_to_midi(audio_features_mod["f0_hz"]))
         tuning_factor = get_tuning_factor(
             f0_midi, audio_features_mod["f0_confidence"], mask_on
@@ -146,6 +173,32 @@ def shift_f0(audio_features, pitch_shift=0.0):
         audio_features["f0_hz"], 0.0, librosa.midi_to_hz(110.0)
     )
     return audio_features
+
+
+def get_lufs(audio, sample_rate=16000):
+    """Get Loudness Units relative to Full Scale, as per ITU-R BS.1770"""
+    import pyloudnorm
+
+    if not isinstance(audio, np.ndarray):
+        audio = np.array(audio)
+
+    meter = pyloudnorm.Meter(rate=sample_rate)
+    return meter.integrated_loudness(audio)
+
+
+def normalize_lufs(audio, sample_rate=16000, target_lufs=-14.0, actual_lufs=None):
+    """-14 LUFS is what Spotify uses."""
+    import pyloudnorm
+
+    assert target_lufs <= 0
+
+    if not isinstance(audio, np.ndarray):
+        audio = np.array(audio)
+
+    if actual_lufs is None:
+        actual_lufs = get_lufs(audio, sample_rate)
+
+    return pyloudnorm.normalize.loudness(audio, actual_lufs, target_lufs)
 
 
 def load_dataset_statistics(path):

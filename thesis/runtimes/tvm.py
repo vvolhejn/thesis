@@ -3,15 +3,21 @@ import contextlib
 
 import numpy as np
 import onnx
-import tvm
-import tvm.relay as relay
-import tvm.autotvm
-from tvm.contrib import graph_executor
-from tvm.topi.sparse.utils import (
-    random_sparse_dense_params,
-    random_sparse_conv2d_params,
-)
-from tvm.relay import data_dep_optimization as ddo
+
+try:
+    import tvm
+    import tvm.relay as relay
+    import tvm.autotvm
+    from tvm.contrib import graph_executor
+    from tvm.topi.sparse.utils import (
+        random_sparse_dense_params,
+        random_sparse_conv2d_params,
+    )
+    from tvm.relay import data_dep_optimization as ddo
+except ImportError:
+    # This is ok if we're not planning to use the module.
+    import warnings
+    warnings.warn("Couldn't import TVM")
 
 from . import ONNXRuntime
 from thesis import util

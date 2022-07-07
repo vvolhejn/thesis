@@ -19,9 +19,10 @@ import numpy as np
 
 
 # ---------------------- Evaluation --------------------------------------------
-from thesis.timbre_transfer_util import adjust_batch, load_dataset_statistics
+from thesis.timbre_transfer_util import adjust_batch, load_dataset_statistics, get_lufs
 from thesis.util import get_today_string
 import thesis.newt
+import thesis.runtimes
 
 
 @gin.configurable
@@ -33,10 +34,11 @@ def nas_evaluate(
     save_dir="/tmp/ddsp.gin/training",
     restore_dir="",
     batch_size=1,
-    num_batches=2,
+    num_batches=100,
     evaluate_and_sample=False,
     flag_values_dict=None,
     cache_newt_waveshapers=True,
+    use_runtime=False,
 ):
     """Run evaluation.
 
@@ -68,11 +70,14 @@ def nas_evaluate(
     #     "/Users/vaclav/prog/thesis/data/models/0323-halfrave-1/ckpt-100000"
     # )
 
+    train_data_provider = data_provider
+    data_provider = data_provider.get_evaluation_set()
+
     assert checkpoint_path is not None, f"No checkpoint found in {restore_dir}"
     # Get the dataset.
-    dataset = data_provider.get_batch(batch_size=batch_size, shuffle=False, repeats=-1)
+    dataset = data_provider.get_batch(batch_size=batch_size, shuffle=False, repeats=1)
     # Set number of batches.
-    # If num_batches >=1 set it to a huge value to go through the whole dataset
+    # If num_batches <1 set it to a huge value to go through the whole dataset
     # (StopIteration will be caught).
     num_batches = num_batches if num_batches >= 1 else int(1e12)
 
@@ -90,7 +95,7 @@ def nas_evaluate(
     ]
 
     wandb_run = wandb.init(
-        project="neural-audio-synthesis-thesis",
+        project="nas-evaluation",
         entity="neural-audio-synthesis-thesis",
         name=f"{get_today_string()}-eval-{os.path.basename(save_dir)}",
         sync_tensorboard=True,
@@ -118,6 +123,10 @@ def nas_evaluate(
             thesis.newt.cache_waveshapers_if_possible(model)
         else:
             logging.info("Caching of NEWT waveshapers is disabled.")
+
+        if use_runtime:
+            # Calibrate on training data.
+            use_runtime_for_decoder(model, train_data_provider)
 
         for batch_idx in range(1, num_batches + 1):
             logging.info("Predicting batch %d of size %d", batch_idx, batch_size)
@@ -165,20 +174,28 @@ def evaluate_or_sample_batch(
     mode,
     evaluate_and_sample,
     step,
+    # To be set via gin
+    recompute_f0=True,
 ):
     if isinstance(data_provider, data.SyntheticNotes):
         batch["audio"] = model.generate_synthetic_audio(batch)
         batch["f0_confidence"] = tf.ones_like(batch["f0_hz"])[:, :, 0]
         batch["loudness_db"] = ddsp.spectral_ops.compute_loudness(batch["audio"])
 
-    # Delete the original keys to be sure we're computing them here. This is so that
-    # pitch estimation is included in the timing information.
-    # `F0LoudnessPreprocessor.compute_f0` needs to be set to True in Gin for models
-    # that use pitch info to work.
-    # The configurable `compute_f0` can be used to select the CREPE model size
-    # and other parameters.
-    batch["f0_hz"] = None
-    batch["f0_confidence"] = None
+    if recompute_f0:
+        # Delete the original keys to be sure we're computing them here. This is so that
+        # pitch estimation is included in the timing information.
+        # `F0LoudnessPreprocessor.compute_f0` needs to be set to True in Gin for models
+        # that use pitch info to work.
+        # The configurable `compute_f0` can be used to select the CREPE model size
+        # and other parameters.
+        batch["f0_hz"] = None
+        batch["f0_confidence"] = None
+
+    if isinstance(
+        model.preprocessor, ddsp.training.preprocessing.F0LoudnessPreprocessor
+    ):
+        model.preprocessor.compute_f0 = recompute_f0
 
     with Timer("Autoencoder", logger=None):
         outputs, losses = model(batch, return_losses=True, training=False)
@@ -244,7 +261,13 @@ def plot_time_hierarchy(data: Dict[str, float]):
 def sample_timbre_transfer(model):
     data_provider = ddsp.training.data.TFRecordProvider(
         # transfer3 for the VST models, transfer2 for the older ones
-        file_pattern="/cluster/home/vvolhejn/datasets/transfer3/transfer3.tfrecord*"
+        # file_pattern="/cluster/home/vvolhejn/datasets/transfer3/transfer3.tfrecord*"
+        # transfer4 has Jukebox embeddings
+        file_pattern="/cluster/home/vvolhejn/datasets/transfer4/transfer4.tfrecord*",
+        # Not loaded from gin for some reason?
+        frame_rate=50,
+        with_jukebox=True,
+        centered=True,
     )
 
     dataset = data_provider.get_batch(batch_size=1, shuffle=False, repeats=1)
@@ -253,19 +276,17 @@ def sample_timbre_transfer(model):
         "/cluster/home/vvolhejn/datasets/violin/dataset_statistics_violin.pkl"
     )
 
+    logging.info(f"Timbre transfer")
+
     for i, batch in enumerate(dataset):
         if i % 5 != 0:
             continue
 
-        # logging.info(f'before {batch}')
-        max_loudness_before = batch["loudness_db"].max()
-        batch = adjust_batch(batch, dataset_stats)
-        max_loudness_after = batch["loudness_db"].max()
-
-        logging.info(
-            f"Loudness adjusted from {max_loudness_before:.2f}"
-            f" to {max_loudness_after:.2f}."
-        )
+        logging.info(f'AH {get_lufs(batch["audio"][0], sample_rate=16000)} {get_lufs(batch["audio_16k"][0], sample_rate=16000)}')
+        batch = adjust_batch(batch, dataset_stats, lufs_normalization=-20)
+        logging.info(f'AH {get_lufs(batch["audio"][0], sample_rate=16000)} {get_lufs(batch["audio_16k"][0], sample_rate=16000)}')
+        # target_lufs = -20
+        # batch["loudness_db"] += target_lufs - actual_lufs
 
         if batch["mask_on"].mean() < 0.5:
             # An mostly silent segment.
@@ -291,3 +312,50 @@ def sample_timbre_transfer(model):
 
         # if i == 80:
         #     break
+
+
+def use_runtime_for_decoder(model, data_provider, runtime=None):
+    if runtime is None:
+        runtime = thesis.runtimes.ONNXRuntime(quantization_mode="static_qdq")
+
+    dataset = data_provider.get_batch(
+        batch_size=1,
+        shuffle=True,
+        repeats=1,
+    )
+
+    dataset_iter = iter(dataset)
+
+    def get_batch_fn():
+        batch = next(dataset_iter)
+
+        # Only run the encoder to save time
+        features = model.encode(batch, training=False)
+
+        stacked_features = tf.concat(
+            [features["ld_scaled"], features["f0_scaled"]], axis=-1
+        )
+        return np.array(stacked_features)
+
+    # Take one batch to determine the input shape to the decoder
+    batch = get_batch_fn()
+
+    # From a Keras Layer to a Model
+    decoder = tf.keras.Sequential(
+        [
+            # 2 channels because we have f0 and loudness
+            tf.keras.layers.Input(batch.shape[1:]),
+            model.decoder.dilated_conv_stack,
+        ]
+    )
+
+    runtime.convert(decoder, get_batch_fn=get_batch_fn)
+
+    def alternative_decoder(inputs):
+        # Inputs is a list typically containing ld_scaled and f0_scaled tensors
+        #     stacked_features = tf.concat(inputs, axis=-1)
+
+        output_numpy = runtime.run(np.array(inputs))
+        return tf.convert_to_tensor(output_numpy)
+
+    model.decoder.dilated_conv_stack = alternative_decoder

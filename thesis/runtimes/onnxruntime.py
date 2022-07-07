@@ -29,12 +29,13 @@ class ONNXRuntime(Runtime):
         self.unsigned_activations = unsigned_activations
         self.unsigned_weights = unsigned_weights
 
-    def save_model(self, orig_model, get_batch_fn):
-        input_signature = [
-            tf.TensorSpec(
-                [1] + orig_model.input.shape[1:], dtype=np.float32, name="input"
-            )
-        ]
+    def save_model(self, orig_model, get_batch_fn, input_signature=None):
+        if input_signature is None:
+            input_signature = [
+                tf.TensorSpec(
+                    [1] + orig_model.input.shape[1:], dtype=np.float32, name="input"
+                )
+            ]
         onnx_model, _ = tf2onnx.convert.from_keras(
             orig_model, input_signature, opset=13
         )
@@ -60,8 +61,18 @@ class ONNXRuntime(Runtime):
                     save_path_2,
                     # Signed weights don't work for convolutions?
                     # see https://github.com/microsoft/onnxruntime/issues/3130
-                    weight_type=get_type(self.unsigned_weights),
                     # Cannot set activation type for dynamic quantization.
+                    weight_type=get_type(self.unsigned_weights),
+                    per_channel=True,
+                    reduce_range=True,
+                    extra_options={
+                        # The default is WeightSymmetric == not self.unsigned_weights:
+                        # https://github.com/microsoft/onnxruntime/blob/f72288b453bedfc5ae2d1eab4725c014862db8d1/onnxruntime/python/tools/quantization/onnx_quantizer.py#L89
+                        # But let's make sure it's always True
+                        "WeightSymmetric": True,
+                        # This is the default, but let's make it explicit
+                        "ActivationSymmetric": False,
+                    }
                 )
             else:
 
@@ -91,7 +102,13 @@ class ONNXRuntime(Runtime):
                     activation_type=get_type(self.unsigned_activations),
                     weight_type=get_type(self.unsigned_weights),
                     per_channel=True,
+                    reduce_range=True,
                     quant_format=quant_format,
+                    extra_options={
+                        # These are the defaults, but let's make it explicit
+                        "WeightSymmetric": True,
+                        "ActivationSymmetric": False,
+                    }
                 )
 
             self.save_path = save_path_2

@@ -1,0 +1,47 @@
+# -*-Python-*-
+
+include 'ddspae-jukebox.gin'
+#
+#import ddsp
+#import ddsp.training
+
+# =====
+# Model
+# =====
+get_model.model = @models.Autoencoder()
+
+# Preprocessor
+Autoencoder.preprocessor = @preprocessing.JukeboxPreprocessor()
+
+# Encoder
+Autoencoder.encoder = None
+# Decoder
+Autoencoder.decoder = @decoders.DilatedConvDecoder()
+
+DilatedConvDecoder:
+#    output_splits = (('control_embedding', %decoder_output_channels),)
+    output_splits = (('amps', 1),
+                     ('f0_hz_pred', 1),
+                     ('harmonic_distribution', 60),
+                     ('noise_magnitudes', 65))
+
+Autoencoder.processor_group = @processors.ProcessorGroup()
+
+ProcessorGroup.dag = [
+  (@synths.Harmonic(),
+#    Use f0_hz_pred instead of f0_hz (which comes from CREPE)
+    ['amps', 'harmonic_distribution', 'f0_hz_pred']),
+  (@synths.FilteredNoise(),
+    ['noise_magnitudes']),
+  (@processors.Add(),
+    ['filtered_noise/signal', 'harmonic/signal']),
+  (@effects.Reverb(),
+    ['add/signal']),
+]
+
+Autoencoder.losses = [
+    @losses.SpectralLoss(),
+    @losses.PretrainedCREPEEmbeddingLoss()
+]
+
+PretrainedCREPEEmbeddingLoss.weight = 0.00005

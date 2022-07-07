@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="vaclav@n1-west1-1:22 agent" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false" autoUploadExternalChanges="true">
+  <component name="PublishConfigData" autoUpload="Always" serverName="Euler" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false" autoUploadExternalChanges="true">
     <option name="confirmBeforeUploading" value="false" />
     <serverData>
       <paths name="Bini">
@@ -17,10 +17,12 @@
             <mapping deploy="thesis/" local="$PROJECT_DIR$" web="/" />
             <mapping deploy="gjobs/" local="$PROJECT_DIR$/../gjobs" web="/" />
             <mapping deploy="ddsp/" local="$PROJECT_DIR$/../ddsp" web="/" />
+            <mapping deploy="jukebox" local="$PROJECT_DIR$/../jukebox" web="/" />
           </mappings>
           <excludedPaths>
             <excludedPath local="true" path="$PROJECT_DIR$/data" />
             <excludedPath local="true" path="$PROJECT_DIR$/notebooks" />
+            <excludedPath local="true" path="$PROJECT_DIR$/../jukebox/jukebox-venv" />
           </excludedPaths>
         </serverdata>
       </paths>
@@ -52,6 +54,8 @@
         <serverdata>
           <mappings>
             <mapping deploy="/home/vaclav/thesis" local="$PROJECT_DIR$" />
+            <mapping deploy="/home/vaclav/ddsp" local="$PROJECT_DIR$/../ddsp" />
+            <mapping deploy="/home/vaclav/jukebox" local="$PROJECT_DIR$/../jukebox" />
           </mappings>
           <excludedPaths>
             <excludedPath local="true" path="$PROJECT_DIR$/data" />

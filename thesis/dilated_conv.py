@@ -2,6 +2,7 @@ import codetiming
 import gin
 import tensorflow as tf
 import tensorflow.keras.layers as tfkl
+from codetiming import Timer
 from keras import backend
 
 import ddsp.training
@@ -15,6 +16,7 @@ def InvertedBottleneckBlock(
     transpose=False,
     stride=1,  # **kwargs
     batch_norm=True,
+    is_1d=True,
 ):
     """
     Expects input of shape [batch, time, 1, in_channels]
@@ -32,6 +34,9 @@ def InvertedBottleneckBlock(
 
     channel_axis = 1 if backend.image_data_format() == "channels_first" else -1
     assert channel_axis == -1  # To use dense layers as conv2d layers
+
+    if is_1d:
+        assert dilation_rate == 1
 
     def maybe_batch_norm():
         if batch_norm:
@@ -67,10 +72,11 @@ def InvertedBottleneckBlock(
             # Depthwise 3x3 convolution.
             tfkl.DepthwiseConv2D(
                 # no channels argument since this is a depthwise conv
-                kernel_size=(kernel_size, 1),  # should probably be (3, 1)
+                # should probably be (3, 1) for 1d, 3 for 2d
+                kernel_size=(kernel_size, 1) if is_1d else kernel_size,
                 padding="same",
                 use_bias=False,
-                dilation_rate=(dilation_rate, 1),
+                dilation_rate=(dilation_rate, 1) if is_1d else dilation_rate,
                 # **kwargs,
             ),
         ]
@@ -144,7 +150,6 @@ class DilatedConvStack(tfkl.Layer):
         stacks_per_resample=1,
         resample_after_convolve=True,
         use_inverted_bottleneck=False,
-        **kwargs,
     ):
         """Constructor.
 
@@ -162,7 +167,6 @@ class DilatedConvStack(tfkl.Layer):
           resample_after_convolve: Ordering of convolution and resampling. If True,
             apply `stacks_per_resample` stacks of convolution then a resampling
             layer. If False, apply the opposite order.
-          **kwargs: Other keras kwargs.
 
         Returns:
           Convolved and resampled signal. If inputs shape is [batch, time, ch_in],
@@ -171,7 +175,7 @@ class DilatedConvStack(tfkl.Layer):
           smaller or larger than `time` depending on whether `resample_type` is
           upsampling or downsampling.
         """
-        super().__init__(**kwargs)
+        super().__init__()
         self.resample_after_convolve = resample_after_convolve
 
         self.config_dict = {
@@ -309,3 +313,47 @@ class DilatedConvStack(tfkl.Layer):
             stacks * dilation**layers_per_stack
         ) - stacks_correction
         return res
+
+
+@gin.register
+class CustomDilatedConvDecoder(ddsp.training.nn.OutputSplitsLayer):
+    """
+    Wraps DilatedConvStack into an OutputSplitsLayer.
+    The "Custom" is to distinguish it from DDSP's implementation.
+    """
+
+    def __init__(
+        self,
+        ch=256,
+        kernel_size=3,
+        layers_per_stack=5,
+        stacks=2,
+        dilation=2,
+        resample_stride=1,
+        stacks_per_resample=1,
+        resample_after_convolve=True,
+        use_inverted_bottleneck=False,
+        input_keys=("ld_scaled", "f0_scaled"),
+        output_splits=(("amps", 1), ("harmonic_distribution", 60)),
+        **kwargs,
+    ):
+        super().__init__(input_keys, output_splits, **kwargs)
+
+        self.dilated_conv_stack = DilatedConvStack(
+            ch=ch,
+            kernel_size=kernel_size,
+            layers_per_stack=layers_per_stack,
+            stacks=stacks,
+            dilation=dilation,
+            resample_type="upsample" if resample_stride > 1 else None,
+            resample_stride=resample_stride,
+            stacks_per_resample=stacks_per_resample,
+            resample_after_convolve=resample_after_convolve,
+            use_inverted_bottleneck=use_inverted_bottleneck,
+        )
+
+    def compute_output(self, *inputs):
+        stack_inputs = tf.concat(inputs, axis=-1)
+
+        with Timer("decoder.dilated_cnn", logger=None):
+            return self.dilated_conv_stack(stack_inputs)

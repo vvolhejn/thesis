@@ -1,8 +1,13 @@
 import os
 
-import deepsparse
-from sparseml.pytorch.optim import ScheduledModifierManager
-from sparseml.pytorch.utils import ModuleExporter, get_prunable_layers, tensor_sparsity
+try:
+    import deepsparse
+    from sparseml.pytorch.optim import ScheduledModifierManager
+    from sparseml.pytorch.utils import ModuleExporter, get_prunable_layers, tensor_sparsity
+except Exception as e:
+    # This is ok if we're not planning to use the module.
+    import warnings
+    warnings.warn(f"Couldn't import DeepSparse: {e}")
 
 import torch
 
@@ -57,13 +62,13 @@ class DeepSparse(Runtime, NeedsPyTorchModel):
                 ), f"Layer {name} has sparsity {layer_sparsity}, expected ~{self.sparsity}"
 
         save_dir = TEMP_DIR
-        quant_onnx_graph_name = f"{self.get_id()}.onnx"
-        self.save_path = os.path.join(save_dir, quant_onnx_graph_name)
+        optimized_model_filename = f"{self.get_id()}.onnx"
+        self.save_path = os.path.join(save_dir, optimized_model_filename)
 
         exporter = ModuleExporter(orig_model, output_dir=save_dir)
         exporter.export_onnx(
             torch.from_numpy(get_batch_fn()),
-            name=quant_onnx_graph_name,
+            name=optimized_model_filename,
             convert_qat=True,
         )
 

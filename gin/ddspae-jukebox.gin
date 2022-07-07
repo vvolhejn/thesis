@@ -1,0 +1,93 @@
+# -*-Python-*-
+
+import ddsp
+import ddsp.training
+
+# =====
+# Model
+# =====
+get_model.model = @models.Autoencoder()
+
+# Preprocessor
+Autoencoder.preprocessor = @preprocessing.JukeboxPreprocessor()
+
+# Encoder
+Autoencoder.encoder = None
+# Decoder
+Autoencoder.decoder = @decoders.DilatedConvDecoder()
+
+DilatedConvDecoder:
+    ch = 128
+    layers_per_stack = 3
+    kernel_size = 3
+    dilation = 3
+
+    norm_type = "layer"
+    input_keys = ('jukebox_embeddings_2',)
+
+    stacks = 2
+    # No resampling unlike in RAVE - DDSP expects the same sampling rate as for the f0 signal from the encoder.
+#    resample_stride = 3
+
+    conditioning_keys = None  # Nothing else than a latent, so no need to consider this separately
+    precondition_stack = None  # Not relevant since `conditioning_keys = None`
+
+#    output_splits = (('control_embedding', %decoder_output_channels),)
+    output_splits = (('amps', 1),
+                     ('harmonic_distribution', 60),
+                     ('noise_magnitudes', 65))
+
+    resample_after_convolve = False
+
+# Losses
+Autoencoder.losses = [
+    @losses.SpectralLoss(),
+]
+SpectralLoss.loss_type = 'L1'
+SpectralLoss.mag_weight = 1.0
+SpectralLoss.logmag_weight = 1.0
+
+# ==============
+# ProcessorGroup
+# ==============
+
+Autoencoder.processor_group = @processors.ProcessorGroup()
+
+ProcessorGroup.dag = [
+  (@synths.Harmonic(),
+    ['amps', 'harmonic_distribution', 'f0_hz']),
+  (@synths.FilteredNoise(),
+    ['noise_magnitudes']),
+  (@processors.Add(),
+    ['filtered_noise/signal', 'harmonic/signal']),
+  (@effects.Reverb(),
+    ['add/signal']),
+]
+
+# Harmonic Synthesizer
+Harmonic.name = 'harmonic'
+Harmonic.n_samples = 64000
+Harmonic.sample_rate = 16000
+Harmonic.normalize_below_nyquist = True
+Harmonic.scale_fn = @core.exp_sigmoid
+
+# Filtered Noise Synthesizer
+FilteredNoise.name = 'filtered_noise'
+FilteredNoise.n_samples = 64000
+FilteredNoise.window_size = 0
+FilteredNoise.scale_fn = @core.exp_sigmoid
+
+# Add
+processors.Add.name = 'add'
+
+# Reverb
+Reverb.name = 'reverb'
+Reverb.reverb_length = 48000
+Reverb.trainable = True
+
+# Log spectrograms.
+train_util.train.model_specific_summary_fn = @summarize_ddspae
+
+TFRecordProvider.with_jukebox = True
+TFRecordProvider.centered = True
+TFRecordProvider.frame_rate = 50

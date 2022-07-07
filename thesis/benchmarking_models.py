@@ -42,7 +42,11 @@ def dense_models(n_sizes=8, n_layers=1):
         dense_keras = tf.keras.Sequential(layers_keras)
         dense_torch = torch.nn.Sequential(*layers_torch)
 
-        yield dense_keras, dense_torch, {"base_size": base_size, "expansion": expansion}
+        yield dense_keras, dense_torch, {
+            "hidden_size": hidden_size,
+            "expansion": expansion,
+            "n_layers": n_layers,
+        }
 
 
 def cnn_models(n_sizes=10, n_layers=1):
@@ -86,7 +90,11 @@ def cnn_models(n_sizes=10, n_layers=1):
             torch.nn.MaxPool2d(size),
         )
 
-        yield cnn_keras, cnn_torch, {"n_channels": n_channels, "n_layers": n_layers}
+        yield cnn_keras, cnn_torch, {
+            "n_channels": n_channels,
+            "n_layers": n_layers,
+            "resolution": size,
+        }
 
 
 def inverted_bottleneck_models(n_sizes=10, expansion=6):
@@ -123,13 +131,16 @@ def inverted_bottleneck_models(n_sizes=10, expansion=6):
             [
                 tf.keras.Input(shape=(resolution, resolution, channels)),
                 thesis.dilated_conv.InvertedBottleneckBlock(
-                    filters=channels, expansion_rate=expansion, batch_norm=False
+                    filters=channels,
+                    expansion_rate=expansion,
+                    batch_norm=False,
+                    is_1d=False,
                 ),
             ]
         )
 
         model_torch = thesis.dilated_conv_torch.InvertedBottleneckBlock(
-            filters=channels, expansion_rate=expansion, batch_norm=False,
+            filters=channels, expansion_rate=expansion, batch_norm=False, is_1d=False
         )
 
         yield model_keras, model_torch, {
@@ -140,6 +151,9 @@ def inverted_bottleneck_models(n_sizes=10, expansion=6):
 
 
 def dilated_conv_models(n_sizes, n_layers, use_inverted_bottleneck=False):
+    kernel_size = 3
+    dilation = 3
+    input_size = 32  # 2048
 
     for size in range(n_sizes):
         channels = 64 * (size + 1)
@@ -151,14 +165,14 @@ def dilated_conv_models(n_sizes, n_layers, use_inverted_bottleneck=False):
             ch=channels,
             layers_per_stack=n_layers,
             stacks=1,
-            kernel_size=3,
-            dilation=2,
+            kernel_size=kernel_size,
+            dilation=dilation,
             use_inverted_bottleneck=use_inverted_bottleneck,
         )
 
         model_keras = tf.keras.Sequential(
             [
-                tf.keras.layers.Input((64000, 1, 1)),
+                tf.keras.layers.Input((input_size, 1, 1)),
                 model_keras,
             ]
         )
@@ -167,13 +181,20 @@ def dilated_conv_models(n_sizes, n_layers, use_inverted_bottleneck=False):
             ch=channels,
             layers_per_stack=n_layers,
             stacks=1,
-            kernel_size=3,
-            dilation=2,
+            kernel_size=kernel_size,
+            dilation=dilation,
             use_inverted_bottleneck=use_inverted_bottleneck,
             in_ch=1,  # Need to manually specify #input channels for Torch
         )
 
-        yield model_keras, model_torch, {"n_channels": channels, "n_layers": n_layers}
+        yield model_keras, model_torch, {
+            "n_channels": channels,
+            "n_layers": n_layers,
+            "use_inverted_bottleneck": use_inverted_bottleneck,
+            "kernel_size": kernel_size,
+            "dilation": dilation,
+            "input_size": input_size,
+        }
 
 
 def get_models(kind, n_sizes, n_layers=1):

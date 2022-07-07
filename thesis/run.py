@@ -84,6 +84,11 @@ flags.DEFINE_boolean("run_once", False, "Whether evaluation will run once.")
 flags.DEFINE_integer(
     "initial_delay_secs", None, "Time to wait before evaluation starts"
 )
+flags.DEFINE_boolean(
+    "use_runtime",
+    False,
+    "Use a specialized runtime library to run the DilatedConvDecoder when evaluating",
+)
 
 # W&B flags
 flags.DEFINE_string(
@@ -209,6 +214,7 @@ def main(unused_argv):
             save_dir=save_dir,
             restore_dir=restore_dir,
             flag_values_dict=FLAGS.flag_values_dict(),
+            use_runtime=FLAGS.use_runtime,
         )
 
 

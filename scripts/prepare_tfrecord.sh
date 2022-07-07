@@ -2,8 +2,8 @@
 # prepare tfrecord
 #bsub -n 4 -W 24:00 -N -R "rusage[ngpus_excl_p=1]" < ./prepare_tfrecord.sh
 
-AUDIO_FILEPATTERN="$SCRATCH/data/transfer2/*.wav"
-TRAIN_TFRECORD='/cluster/home/vvolhejn/datasets/transfer3/transfer3.tfrecord'
+AUDIO_FILEPATTERN="$SCRATCH/data/audio/transfer2/*.wav"
+TRAIN_TFRECORD='/cluster/home/vvolhejn/datasets/transfer4/transfer4.tfrecord'
 
 module load gcc/8.2.0
 module load python_gpu/3.8.5
@@ -21,4 +21,3 @@ ddsp_prepare_tfrecord \
     --hop_secs=1.0 \
     --viterbi=True \
     --center=True
-#--eval_split_fraction 0.15 \

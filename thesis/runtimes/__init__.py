@@ -27,7 +27,9 @@ from .tflite import TFLite
 from .deepsparse import DeepSparse
 
 
-def get_runtimes(good_only=True, unsigned_weights=False, is_conv=True):
+def get_runtimes(good_only=True, is_conv=True):
+    unsigned_weights = is_conv
+
     runtimes = [
         (False, TensorFlow()),
         (True, DeepSparse(quantization_mode="off")),
@@ -40,7 +42,7 @@ def get_runtimes(good_only=True, unsigned_weights=False, is_conv=True):
         (is_conv, TVM(quantization_mode="dynamic", unsigned_weights=unsigned_weights)),
         (True, TVM(quantization_mode="static_qdq")),
         # TVM with quantization (both static and dynamic) apparently can't use pruning
-        (True, TVM(quantization_mode="off", sparsity=0.9)),
+        # (True, TVM(quantization_mode="off", sparsity=0.9)),
         (True, PyTorch(quantization_mode="off", use_torchscript=True)),
         (True, PyTorch(quantization_mode="dynamic", use_torchscript=True)),
         (True, PyTorch(quantization_mode="static", use_torchscript=True)),
@@ -52,6 +54,11 @@ def get_runtimes(good_only=True, unsigned_weights=False, is_conv=True):
         # (not is_conv, TFLite(sparsity=0.9, quantization_mode="dynamic")),  # bad for CNN
         # (not is_conv, TFLite(sparsity=0.9, quantization_mode="static")),  # bad for CNN
         (True, ONNXRuntime(quantization_mode="off")),
+        # Using unsigned weights for dynamic quantization on CNNs doesn't work:
+        # [ONNXRuntimeError] : 9 : NOT_IMPLEMENTED : Could not find an implementation for ConvInteger(10) node with name '...'
+        # https://github.com/microsoft/onnxruntime/issues/6430
+        # In general, static is preferred for CNNs  :
+        # https://onnxruntime.ai/docs/performance/quantization.html#method-selection
         (
             True,
             ONNXRuntime(quantization_mode="dynamic", unsigned_weights=unsigned_weights),
@@ -78,9 +85,10 @@ def get_runtimes(good_only=True, unsigned_weights=False, is_conv=True):
     # ]
 
     # runtimes = [
-    #     (True, PyTorch(quantization_mode="off", use_torchscript=True)),
-    #     (True, PyTorch(quantization_mode="dynamic", use_torchscript=True)),
-    #     (True, PyTorch(quantization_mode="static", use_torchscript=True)),
+    #     (True, DeepSparse(quantization_mode="off")),
+    #     (True, DeepSparse(quantization_mode="static")),
+    #     (True, DeepSparse(quantization_mode="off", sparsity=0.9)),
+    #     (True, DeepSparse(quantization_mode="static", sparsity=0.9)),
     # ]
 
     # should be possible but doesn't work: OpenVINO(quantization_mode="static_qoperator")

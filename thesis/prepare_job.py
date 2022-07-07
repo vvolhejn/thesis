@@ -70,6 +70,7 @@ def prepare_job(
     gin_params,
     mode_specific_params,
     use_wandb,
+    use_runtime,
 ):
 
     job = f"#{comment}\n"
@@ -88,6 +89,9 @@ def prepare_job(
         "--allow_memory_growth",
         "--gin_search_path=/cluster/home/vvolhejn/thesis/gin/",
     ]
+
+    if use_runtime:
+        params.append("--use_runtime")
 
     params += mode_specific_params
 
@@ -191,6 +195,12 @@ def console_entry_point():
         default=True,
         action="store_false",
     )
+    parser.add_argument(
+        "--use-runtime",
+        help="Use a specialized runtime library to run the decoder for evaluation",
+        default=False,
+        action="store_true",
+    )
 
     args = parser.parse_args()
 
@@ -228,6 +238,7 @@ def console_entry_point():
         gin_params,
         mode_specific_params,
         args.use_wandb,
+        args.use_runtime,
     )
     print(job)
 

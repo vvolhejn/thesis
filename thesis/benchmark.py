@@ -304,11 +304,7 @@ def main(save_dir, n_iterations, n_sizes, n_layers, kind):
     # thesis.runtimes.TEMP_DIR = "/cluster/scratch/vvolhejn/tmp"
 
     is_conv = kind != "dense"
-    n_runtimes = len(
-        thesis.runtimes.get_runtimes(
-            good_only=True, unsigned_weights=is_conv, is_conv=is_conv
-        )
-    )
+    n_runtimes = len(thesis.runtimes.get_runtimes(good_only=True, is_conv=is_conv))
     out_file = os.path.join(save_dir, "results.csv")
 
     results_per_runtime = []
@@ -318,9 +314,9 @@ def main(save_dir, n_iterations, n_sizes, n_layers, kind):
         models = thesis.benchmarking_models.get_models(kind, n_sizes, n_layers)
 
         def runtime_fn():
-            return thesis.runtimes.get_runtimes(
-                good_only=True, unsigned_weights=is_conv, is_conv=is_conv
-            )[runtime_i]
+            return thesis.runtimes.get_runtimes(good_only=True, is_conv=is_conv)[
+                runtime_i
+            ]
 
         runtime_name = runtime_fn().get_name()
 
@@ -406,7 +402,13 @@ if __name__ == "__main__":
     parser.add_argument("--n-iterations", type=int, default=50)
     parser.add_argument(
         "--kind",
-        choices=["dense", "inverted_bottleneck", "cnn", "dilated_cnn", "dilated_cnn_ib"],
+        choices=[
+            "dense",
+            "inverted_bottleneck",
+            "cnn",
+            "dilated_cnn",
+            "dilated_cnn_ib",
+        ],
         required=True,
     )
 

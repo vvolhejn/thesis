@@ -1,5 +1,7 @@
+import math
 import os
 import datetime
+import psutil
 
 import gin
 import tensorflow as tf
@@ -64,10 +66,20 @@ def summarize_ddspae(outputs, step):
 
 
 def get_n_cpus_available():
+    """
+    Returns the number of *physical* CPUs available.
+    """
+
     try:
-        return len(os.sched_getaffinity(0))
+        n_logical = len(os.sched_getaffinity(0))
     except AttributeError:
         # `os.sched_getaffinity()` is not available everywhere - e.g. not on my Mac.
         # The alternative `os.cpu_count()` counts all CPUs, not just the ones
         # that the process is allowed to use. Good enough.
-        return os.cpu_count()
+        n_logical = os.cpu_count()
+
+    threads_per_core = psutil.cpu_count() / psutil.cpu_count(logical=False)
+    assert int(threads_per_core) == threads_per_core
+    threads_per_core = int(threads_per_core)
+
+    return math.ceil(n_logical / threads_per_core)

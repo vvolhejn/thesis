@@ -19,10 +19,10 @@ class OpenVINO(ONNXRuntime):
         from openvino.runtime import Core
 
         self.ie = Core()
-        self.ie.set_property(
-            "CPU", {"CPU_THREADS_NUM": str(util.get_n_cpus_available())}
-        )
-        print("OPENVINO THREADS", self.ie.get_property("CPU", "CPU_THREADS_NUM"))
+        # self.ie.set_property(
+        #     "CPU", {"CPU_THREADS_NUM": str(util.get_n_cpus_available())}
+        # )
+        # print("OPENVINO THREADS", self.ie.get_property("CPU", "CPU_THREADS_NUM"))
 
         super().convert(orig_model, get_batch_fn)
         self.save_dir = os.path.join(TEMP_DIR, self.get_id())
