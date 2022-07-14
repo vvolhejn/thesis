@@ -39,6 +39,9 @@ def nas_evaluate(
     flag_values_dict=None,
     cache_newt_waveshapers=True,
     use_runtime=False,
+    quantization=False,
+    num_calibration_batches=100,
+    calibration_method="minmax",
 ):
     """Run evaluation.
 
@@ -94,12 +97,24 @@ def nas_evaluate(
         for evaluator_class in evaluator_classes
     ]
 
+    name = f"{get_today_string()}-eval-{os.path.basename(save_dir)}"
+
+    if use_runtime:
+        name += "-rt"
+        if quantization:
+            name += "q"
+
     wandb_run = wandb.init(
         project="nas-evaluation",
         entity="neural-audio-synthesis-thesis",
-        name=f"{get_today_string()}-eval-{os.path.basename(save_dir)}",
+        name=name,
         sync_tensorboard=True,
-        config=flag_values_dict,
+        config={
+            **flag_values_dict,
+            "num_batches": num_batches,
+            "num_calibration_batches": num_calibration_batches,
+            "calibration_method": calibration_method,
+        },
         dir="/cluster/scratch/vvolhejn/wandb",
         tags=["eval"],
     )
@@ -126,7 +141,16 @@ def nas_evaluate(
 
         if use_runtime:
             # Calibrate on training data.
-            use_runtime_for_decoder(model, train_data_provider)
+            use_runtime_for_decoder(
+                model,
+                train_data_provider,
+                quantization=quantization,
+                num_calibration_batches=num_calibration_batches,
+            )
+        else:
+            assert (
+                not quantization
+            ), "Quantization cannot be applied without --use-runtime"
 
         for batch_idx in range(1, num_batches + 1):
             logging.info("Predicting batch %d of size %d", batch_idx, batch_size)
@@ -154,7 +178,16 @@ def nas_evaluate(
 
         log_timing_info(dataset, sample_rate)
 
-        sample_timbre_transfer(model)
+        sample_timbre_transfer(
+            model,
+            "/cluster/home/vvolhejn/datasets/transfer4/transfer4.tfrecord*",
+            name="timbre_transfer",
+            every_nth=5,
+        )
+
+        sample_timbre_transfer(
+            model, data_provider._file_pattern, name="audio_both", every_nth=10
+        )
 
         if mode == "eval" or evaluate_and_sample:
             for evaluator in evaluators:
@@ -238,6 +271,7 @@ def log_timing_info(dataset, sample_rate):
 
 def plot_time_hierarchy(data: Dict[str, float]):
     items = list(data.items())
+    logging.info(items)
     names = [k.split(".")[-1] for k, v in items]
     values = [v for k, v in items]
 
@@ -258,12 +292,12 @@ def plot_time_hierarchy(data: Dict[str, float]):
     return fig
 
 
-def sample_timbre_transfer(model):
+def sample_timbre_transfer(model, file_pattern, name, every_nth=5):
     data_provider = ddsp.training.data.TFRecordProvider(
         # transfer3 for the VST models, transfer2 for the older ones
         # file_pattern="/cluster/home/vvolhejn/datasets/transfer3/transfer3.tfrecord*"
         # transfer4 has Jukebox embeddings
-        file_pattern="/cluster/home/vvolhejn/datasets/transfer4/transfer4.tfrecord*",
+        file_pattern=file_pattern,
         # Not loaded from gin for some reason?
         frame_rate=50,
         with_jukebox=True,
@@ -279,14 +313,10 @@ def sample_timbre_transfer(model):
     logging.info(f"Timbre transfer")
 
     for i, batch in enumerate(dataset):
-        if i % 5 != 0:
+        if i % every_nth != 0:
             continue
 
-        logging.info(f'AH {get_lufs(batch["audio"][0], sample_rate=16000)} {get_lufs(batch["audio_16k"][0], sample_rate=16000)}')
         batch = adjust_batch(batch, dataset_stats, lufs_normalization=-20)
-        logging.info(f'AH {get_lufs(batch["audio"][0], sample_rate=16000)} {get_lufs(batch["audio_16k"][0], sample_rate=16000)}')
-        # target_lufs = -20
-        # batch["loudness_db"] += target_lufs - actual_lufs
 
         if batch["mask_on"].mean() < 0.5:
             # An mostly silent segment.
@@ -305,7 +335,7 @@ def sample_timbre_transfer(model):
         )
 
         ddsp.training.summaries.audio_summary(
-            audio_both, step=i, sample_rate=sample_rate, name="timbre_transfer"
+            audio_both, step=i, sample_rate=sample_rate, name=name
         )
 
         logging.info(f"Predicted sample {i+1}")
@@ -314,9 +344,30 @@ def sample_timbre_transfer(model):
         #     break
 
 
-def use_runtime_for_decoder(model, data_provider, runtime=None):
+@gin.configurable
+def use_runtime_for_decoder(
+    model,
+    data_provider,
+    quantization=False,
+    runtime=None,
+    num_calibration_batches=100,
+    calibration_method="minmax",
+):
+    import onnxruntime.quantization as ortq
+
+    calibration_method_d = {
+        "minmax": ortq.CalibrationMethod.MinMax,
+        "entropy": ortq.CalibrationMethod.Entropy,
+        "percentile": ortq.CalibrationMethod.Percentile,
+    }
+    assert calibration_method in calibration_method_d
+    # From string to ORT's enum
+    calibration_method = calibration_method_d[calibration_method]
+
     if runtime is None:
-        runtime = thesis.runtimes.ONNXRuntime(quantization_mode="static_qdq")
+        runtime = thesis.runtimes.ONNXRuntime(
+            quantization_mode="static_qdq" if quantization else "off"
+        )
 
     dataset = data_provider.get_batch(
         batch_size=1,
@@ -349,7 +400,12 @@ def use_runtime_for_decoder(model, data_provider, runtime=None):
         ]
     )
 
-    runtime.convert(decoder, get_batch_fn=get_batch_fn)
+    runtime.convert(
+        decoder,
+        get_batch_fn=get_batch_fn,
+        n_calibration_batches=num_calibration_batches,
+        calibration_method=calibration_method,
+    )
 
     def alternative_decoder(inputs):
         # Inputs is a list typically containing ld_scaled and f0_scaled tensors

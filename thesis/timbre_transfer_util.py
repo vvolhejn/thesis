@@ -144,7 +144,9 @@ def adjust_one(
         # This will not work for sampling rates other than 16000
         audio_features_mod["audio"] = tf.convert_to_tensor(normalized_audio)
 
-        logging.info(f"Loudness adjusted from {actual_lufs} dB LUFS to {target_lufs}.")
+        logging.info(
+            f"Loudness adjusted from {actual_lufs:.1f} dB LUFS to {target_lufs:.1f}."
+        )
 
     # Auto-tune.
     if autotune_factor:

@@ -89,6 +89,11 @@ flags.DEFINE_boolean(
     False,
     "Use a specialized runtime library to run the DilatedConvDecoder when evaluating",
 )
+flags.DEFINE_boolean(
+    "quantization",
+    False,
+    "Whether to use quantization if a runtime is used",
+)
 
 # W&B flags
 flags.DEFINE_string(
@@ -215,6 +220,7 @@ def main(unused_argv):
             restore_dir=restore_dir,
             flag_values_dict=FLAGS.flag_values_dict(),
             use_runtime=FLAGS.use_runtime,
+            quantization=FLAGS.quantization,
         )
 
 

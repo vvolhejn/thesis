@@ -18,6 +18,7 @@ CustomDilatedConvDecoder:
     ch = 128
     layers_per_stack = 3
     kernel_size = 3
+    dilation = 3
 
     input_keys = ('ld_scaled', 'f0_scaled')
 

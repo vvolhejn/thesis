@@ -40,14 +40,22 @@ class ONNXRuntime(Runtime):
             orig_model, input_signature, opset=13
         )
 
+        # TEMP_DIR = "/cluster/scratch/vvolhejn/tmp"
         save_path = os.path.join(TEMP_DIR, self.get_id() + ".onnx")
         onnx.save(onnx_model, save_path)
         self.save_path = save_path
 
-    def convert(self, orig_model, get_batch_fn=None):
+    def convert(
+        self,
+        orig_model,
+        get_batch_fn=None,
+        n_calibration_batches=10,
+        calibration_method: ortq.CalibrationMethod = ortq.CalibrationMethod.MinMax,
+    ):
         super().convert(orig_model)
 
         self.save_model(orig_model, get_batch_fn)
+        print(f"Saved model to {self.save_path}")
 
         def get_type(is_unsigned):
             return ortq.QuantType.QUInt8 if is_unsigned else ortq.QuantType.QInt8
@@ -72,7 +80,7 @@ class ONNXRuntime(Runtime):
                         "WeightSymmetric": True,
                         # This is the default, but let's make it explicit
                         "ActivationSymmetric": False,
-                    }
+                    },
                 )
             else:
 
@@ -82,7 +90,7 @@ class ONNXRuntime(Runtime):
                         self.get_batch_fn = get_batch_fn
 
                     def get_next(self):
-                        if self.i == 10:
+                        if self.i == n_calibration_batches:
                             return None
                         else:
                             self.i += 1
@@ -108,7 +116,13 @@ class ONNXRuntime(Runtime):
                         # These are the defaults, but let's make it explicit
                         "WeightSymmetric": True,
                         "ActivationSymmetric": False,
-                    }
+                        "CalibMovingAverage": True,
+                    },
+                    calibrate_method=calibration_method,
+                )
+                print(
+                    f"After static quantization with {calibration_method}, "
+                    f"saved to {save_path_2}"
                 )
 
             self.save_path = save_path_2

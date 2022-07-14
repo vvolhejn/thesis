@@ -18,7 +18,7 @@ from thesis.prepare_job_util import get_today_string, add_distinguishing_suffix
 
 import thesis.runtimes
 
-if socket.gethostname().startswith("eu-login"):
+if socket.gethostname().startswith("eu-"):
     # ETH cluster (Euler)
     TEMP_DIR = "/cluster/scratch/vvolhejn/tmp"
     BENCHMARK_DATA_DIR = "/cluster/home/vvolhejn/benchmark_data"
@@ -260,6 +260,8 @@ def benchmark_one_runtime(runtime_fn, models, n_iterations):
             df["model_i"] = i
             df["flop"] = flops
             df["name"] = cur_runtime.get_name()
+            for k, v in metadata.items():
+                df[k] = v
 
         runs = raw_runs.groupby("name").agg(
             {
@@ -276,8 +278,6 @@ def benchmark_one_runtime(runtime_fn, models, n_iterations):
         apply_metadata(runs)
         apply_metadata(raw_runs)
 
-        for k, v in metadata.items():
-            runs[k] = v
         runs["flop_per_s"] = flops / runs["inference_time_s_mean"]
         # runs["name"] = cur_runtime.get_name()
 

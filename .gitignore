@@ -4,6 +4,7 @@ data/
 *.egg-info/
 .pytest_cache/
 wandb/
+figures/
 
 # Tensorboard logs
 logdir/

@@ -46,6 +46,8 @@ class TVM(ONNXRuntime):
         self.tuning_records_path = tuning_records_path
 
     def convert(self, orig_model, get_batch_fn=None):
+        # https://tvm.apache.org/docs/how_to/deploy_models/deploy_prequantized.html
+        # "Set the environment variable TVM_NUM_THREADS to the number of physical cores"
         os.environ["TVM_NUM_THREADS"] = str(util.get_n_cpus_available())
 
         super().convert(orig_model, get_batch_fn)

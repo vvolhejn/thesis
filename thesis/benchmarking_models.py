@@ -114,6 +114,9 @@ def inverted_bottleneck_models(n_sizes=10, expansion=6):
     # Coefficient values from EfficientNet: https://arxiv.org/pdf/1905.11946.pdf
     resolution_coef = 1.15
     channels_coef = 1.1
+
+    # From MobileNet v2. The blocks with these parameters take the highest number of flops
+    # in the model, computed as [flops of the block] * [number of blocks with this config]
     resolution_base = 14
     channels_base = 160
 

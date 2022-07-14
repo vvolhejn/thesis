@@ -35,8 +35,8 @@ def InvertedBottleneckBlock(
     channel_axis = 1 if backend.image_data_format() == "channels_first" else -1
     assert channel_axis == -1  # To use dense layers as conv2d layers
 
-    if is_1d:
-        assert dilation_rate == 1
+    # if is_1d:
+    #     assert dilation_rate == 1
 
     def maybe_batch_norm():
         if batch_norm:
@@ -69,7 +69,6 @@ def InvertedBottleneckBlock(
         + maybe_batch_norm()
         + [
             tfkl.Activation(tf.nn.relu6),
-            # Depthwise 3x3 convolution.
             tfkl.DepthwiseConv2D(
                 # no channels argument since this is a depthwise conv
                 # should probably be (3, 1) for 1d, 3 for 2d
@@ -144,7 +143,7 @@ class DilatedConvStack(tfkl.Layer):
         layers_per_stack=5,
         stacks=2,
         kernel_size=3,
-        dilation=2,
+        dilation=3,
         resample_type=None,
         resample_stride=1,
         stacks_per_resample=1,
@@ -328,7 +327,7 @@ class CustomDilatedConvDecoder(ddsp.training.nn.OutputSplitsLayer):
         kernel_size=3,
         layers_per_stack=5,
         stacks=2,
-        dilation=2,
+        dilation=3,
         resample_stride=1,
         stacks_per_resample=1,
         resample_after_convolve=True,

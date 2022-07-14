@@ -71,6 +71,7 @@ def prepare_job(
     mode_specific_params,
     use_wandb,
     use_runtime,
+    quantization,
 ):
 
     job = f"#{comment}\n"
@@ -92,6 +93,9 @@ def prepare_job(
 
     if use_runtime:
         params.append("--use_runtime")
+
+    if quantization:
+        params.append("--quantization")
 
     params += mode_specific_params
 
@@ -201,6 +205,12 @@ def console_entry_point():
         default=False,
         action="store_true",
     )
+    parser.add_argument(
+        "--quantization",
+        help="Whether the runtime from --use-runtime should use quantization",
+        default=False,
+        action="store_true",
+    )
 
     args = parser.parse_args()
 
@@ -239,6 +249,7 @@ def console_entry_point():
         mode_specific_params,
         args.use_wandb,
         args.use_runtime,
+        args.quantization,
     )
     print(job)
 
