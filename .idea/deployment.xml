@@ -1,8 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="Euler" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false" autoUploadExternalChanges="true">
+  <component name="PublishConfigData" autoUpload="Always" serverName="Ault" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false" autoUploadExternalChanges="true">
     <option name="confirmBeforeUploading" value="false" />
     <serverData>
+      <paths name="Ault">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/users/vvolhejn/thesis" local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/users/vvolhejn/jukebox" local="$PROJECT_DIR$/../jukebox" web="/" />
+            <mapping deploy="/users/vvolhejn/ddsp" local="$PROJECT_DIR$/../ddsp" web="/" />
+          </mappings>
+          <excludedPaths>
+            <excludedPath local="true" path="$PROJECT_DIR$/data" />
+            <excludedPath local="true" path="$PROJECT_DIR$/../jukebox/jukebox-venv" />
+          </excludedPaths>
+        </serverdata>
+      </paths>
       <paths name="Bini">
         <serverdata>
           <mappings>

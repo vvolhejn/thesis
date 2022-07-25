@@ -9,6 +9,13 @@
           </advancedOptions>
         </fileTransfer>
       </webServer>
+      <webServer id="a3636792-57aa-42e8-b2e8-438b9181a01d" name="Ault">
+        <fileTransfer accessType="SFTP" host="ault" port="22" sshConfigId="191620ed-ffbf-4630-ab5b-2afb250f6af0" sshConfig="vvolhejn@ault:22 agent" authAgent="true">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
     </option>
   </component>
 </project>
