@@ -94,6 +94,8 @@ class ONNXRuntime(Runtime):
                             return None
                         else:
                             self.i += 1
+                            if self.i % 10 == 0:
+                                print(f"Calibration: {self.i}/{n_calibration_batches}")
                             return {"input": self.get_batch_fn()}
 
                 quant_format = (
@@ -101,6 +103,8 @@ class ONNXRuntime(Runtime):
                     if self.quantization_mode == "static_qdq"
                     else ortq.QuantFormat.QOperator
                 )
+
+                calib_moving_average = True
 
                 save_path_2 = os.path.join(TEMP_DIR, self.get_id() + "_2.onnx")
                 ortq.quantize_static(
@@ -116,13 +120,14 @@ class ONNXRuntime(Runtime):
                         # These are the defaults, but let's make it explicit
                         "WeightSymmetric": True,
                         "ActivationSymmetric": False,
-                        "CalibMovingAverage": True,
+                        "CalibMovingAverage": calib_moving_average,
                     },
                     calibrate_method=calibration_method,
                 )
                 print(
-                    f"After static quantization with {calibration_method}, "
-                    f"saved to {save_path_2}"
+                    f"After static quantization with {calibration_method}"
+                    + (f" with moving average" if calib_moving_average else "")
+                    + f" saved to {save_path_2}"
                 )
 
             self.save_path = save_path_2

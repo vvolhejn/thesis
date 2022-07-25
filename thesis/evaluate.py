@@ -7,6 +7,7 @@ import os
 import time
 from typing import Dict
 
+import pandas as pd
 import plotly.express as px
 from codetiming import Timer
 import wandb
@@ -73,31 +74,9 @@ def nas_evaluate(
     #     "/Users/vaclav/prog/thesis/data/models/0323-halfrave-1/ckpt-100000"
     # )
 
-    train_data_provider = data_provider
-    data_provider = data_provider.get_evaluation_set()
-
     assert checkpoint_path is not None, f"No checkpoint found in {restore_dir}"
-    # Get the dataset.
-    dataset = data_provider.get_batch(batch_size=batch_size, shuffle=False, repeats=1)
-    # Set number of batches.
-    # If num_batches <1 set it to a huge value to go through the whole dataset
-    # (StopIteration will be caught).
-    num_batches = num_batches if num_batches >= 1 else int(1e12)
 
-    # Get audio sample rate
-    sample_rate = data_provider.sample_rate
-    # Get feature frame rate
-    frame_rate = data_provider.frame_rate
-
-    latest_losses = None
-
-    # Initialize evaluators.
-    evaluators = [
-        evaluator_class(sample_rate, frame_rate)
-        for evaluator_class in evaluator_classes
-    ]
-
-    name = f"{get_today_string()}-eval-{os.path.basename(save_dir)}"
+    name = f"{get_today_string()}-eval-{os.path.basename(save_dir.rstrip('/'))}"
 
     if use_runtime:
         name += "-rt"
@@ -118,6 +97,35 @@ def nas_evaluate(
         dir="/cluster/scratch/vvolhejn/wandb",
         tags=["eval"],
     )
+
+    output_dir = os.path.join(
+        os.path.expanduser("~"),
+        "eval_data",
+        f"{os.path.basename(save_dir.rstrip('/'))}",
+    )
+
+    train_data_provider = data_provider
+    data_provider = data_provider.get_evaluation_set()
+
+    # Get the dataset.
+    dataset = data_provider.get_batch(batch_size=batch_size, shuffle=False, repeats=1)
+    # Set number of batches.
+    # If num_batches <1 set it to a huge value to go through the whole dataset
+    # (StopIteration will be caught).
+    num_batches = num_batches if num_batches >= 1 else int(1e12)
+
+    # Get audio sample rate
+    sample_rate = data_provider.sample_rate
+    # Get feature frame rate
+    frame_rate = data_provider.frame_rate
+
+    latest_losses = None
+
+    # Initialize evaluators.
+    evaluators = [
+        evaluator_class(sample_rate, frame_rate)
+        for evaluator_class in evaluator_classes
+    ]
 
     with summary_writer.as_default():
         step = int(checkpoint_path.split("-")[-1])
@@ -152,8 +160,11 @@ def nas_evaluate(
                 not quantization
             ), "Quantization cannot be applied without --use-runtime"
 
+        logging.info(
+            f"Predicting {num_batches if num_batches < 1e9 else 'all'} batches."
+        )
         for batch_idx in range(1, num_batches + 1):
-            logging.info("Predicting batch %d of size %d", batch_idx, batch_size)
+            # logging.info("Predicting batch %d of size %d", batch_idx, batch_size)
             try:
                 batch = next(dataset_iter)
                 evaluate_or_sample_batch(
@@ -176,17 +187,21 @@ def nas_evaluate(
             Timer.timers["Autoencoder"],
         )
 
-        log_timing_info(dataset, sample_rate)
+        log_timing_info(dataset, sample_rate, output_dir)
+
+        timbre_transfer_data_provider = ddsp.training.data.WandbTFRecordProvider(
+            "neural-audio-synthesis-thesis/transfer4:v0"
+        )
 
         sample_timbre_transfer(
             model,
-            "/cluster/home/vvolhejn/datasets/transfer4/transfer4.tfrecord*",
+            timbre_transfer_data_provider,
             name="timbre_transfer",
             every_nth=5,
         )
 
         sample_timbre_transfer(
-            model, data_provider._file_pattern, name="audio_both", every_nth=10
+            model, data_provider, name="audio_both", every_nth=10, adjust=False
         )
 
         if mode == "eval" or evaluate_and_sample:
@@ -241,7 +256,7 @@ def evaluate_or_sample_batch(
             evaluator.sample(batch, outputs, step)
 
 
-def log_timing_info(dataset, sample_rate):
+def log_timing_info(dataset, sample_rate, output_dir):
     dummy_batch = next(iter(dataset))["audio"]
     batch_sample_length_secs = dummy_batch.shape[0] * dummy_batch.shape[1] / sample_rate
 
@@ -261,12 +276,32 @@ def log_timing_info(dataset, sample_rate):
             "prediction_time_secs": Timer.timers.mean("Autoencoder"),
             "real_time_factor": Timer.timers.mean("Autoencoder")
             / batch_sample_length_secs,
+            "decoder_real_time_factor": Timer.timers.mean("decoder.dilated_cnn")
+            / batch_sample_length_secs,
             "time_distribution": wandb.plot.bar(
                 table, "model_part", "mean", title="Time distribution"
             ),
             "time_hierarchy": time_hierarchy_plot,
         }
     )
+
+    os.makedirs(output_dir, exist_ok=True)
+    df = pd.DataFrame(
+        index=pd.RangeIndex(len(Timer.timers._timings["Autoencoder"])),
+        columns=Timer.timers._timings.keys(),
+    )
+    for k, v in Timer.timers._timings.items():
+        df.loc[:, k] = v
+
+    i = 0
+    while True:
+        i += 1
+        name = f"timing-{i}.csv"
+        if not os.path.isfile(os.path.join(output_dir, name)):
+            break
+
+    df.to_csv(os.path.join(output_dir, name))
+    df.to_csv(os.path.join(output_dir, "timing-latest.csv"))
 
 
 def plot_time_hierarchy(data: Dict[str, float]):
@@ -292,22 +327,17 @@ def plot_time_hierarchy(data: Dict[str, float]):
     return fig
 
 
-def sample_timbre_transfer(model, file_pattern, name, every_nth=5):
-    data_provider = ddsp.training.data.TFRecordProvider(
-        # transfer3 for the VST models, transfer2 for the older ones
-        # file_pattern="/cluster/home/vvolhejn/datasets/transfer3/transfer3.tfrecord*"
-        # transfer4 has Jukebox embeddings
-        file_pattern=file_pattern,
-        # Not loaded from gin for some reason?
-        frame_rate=50,
-        with_jukebox=True,
-        centered=True,
-    )
-
+def sample_timbre_transfer(model, data_provider, name, every_nth=5, adjust=True):
     dataset = data_provider.get_batch(batch_size=1, shuffle=False, repeats=1)
 
+    artifact = wandb.run.use_artifact(
+        "neural-audio-synthesis-thesis/violin_dataset_statistics:latest",
+        type="dataset",
+    )
+    artifact_dir = artifact.download()
+
     dataset_stats = load_dataset_statistics(
-        "/cluster/home/vvolhejn/datasets/violin/dataset_statistics_violin.pkl"
+        os.path.join(artifact_dir, "dataset_statistics.pkl")
     )
 
     logging.info(f"Timbre transfer")
@@ -316,12 +346,13 @@ def sample_timbre_transfer(model, file_pattern, name, every_nth=5):
         if i % every_nth != 0:
             continue
 
-        batch = adjust_batch(batch, dataset_stats, lufs_normalization=-20)
+        if adjust:
+            batch = adjust_batch(batch, dataset_stats, lufs_normalization=-20)
 
-        if batch["mask_on"].mean() < 0.5:
-            # An mostly silent segment.
-            # A completely silent one can be detected by `batch["loudness_db"].max() == -80`
-            continue
+            if batch["mask_on"].mean() < 0.5:
+                # An mostly silent segment.
+                # A completely silent one can be detected by `batch["loudness_db"].max() == -80`
+                continue
 
         outputs, losses = model(batch, return_losses=True, training=False)
         sample_rate = 16000
@@ -406,6 +437,7 @@ def use_runtime_for_decoder(
         n_calibration_batches=num_calibration_batches,
         calibration_method=calibration_method,
     )
+    logging.info(f"Converted decoder and saved to {runtime.save_path}")
 
     def alternative_decoder(inputs):
         # Inputs is a list typically containing ld_scaled and f0_scaled tensors
