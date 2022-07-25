@@ -169,6 +169,8 @@ def allow_memory_growth():
 
 
 def main(unused_argv):
+    print("CUDA_VISIBLE_DEVICES:", os.environ.get("CUDA_VISIBLE_DEVICES"))
+
     """Parse gin config and run ddsp training, evaluation, or sampling."""
     restore_dir = os.path.expanduser(FLAGS.restore_dir)
     save_dir = os.path.expanduser(FLAGS.save_dir)

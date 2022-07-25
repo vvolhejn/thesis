@@ -136,7 +136,7 @@ def inverted_bottleneck_models(n_sizes=10, expansion=6):
                 thesis.dilated_conv.InvertedBottleneckBlock(
                     filters=channels,
                     expansion_rate=expansion,
-                    batch_norm=False,
+                    normalize=False,
                     is_1d=False,
                 ),
             ]
@@ -156,7 +156,8 @@ def inverted_bottleneck_models(n_sizes=10, expansion=6):
 def dilated_conv_models(n_sizes, n_layers, use_inverted_bottleneck=False):
     kernel_size = 3
     dilation = 3
-    input_size = 32  # 2048
+    input_size = 128  # 2048
+    n_stacks = 1
 
     for size in range(n_sizes):
         channels = 64 * (size + 1)
@@ -167,7 +168,7 @@ def dilated_conv_models(n_sizes, n_layers, use_inverted_bottleneck=False):
         model_keras = thesis.dilated_conv.DilatedConvStack(
             ch=channels,
             layers_per_stack=n_layers,
-            stacks=1,
+            stacks=n_stacks,
             kernel_size=kernel_size,
             dilation=dilation,
             use_inverted_bottleneck=use_inverted_bottleneck,
@@ -193,6 +194,7 @@ def dilated_conv_models(n_sizes, n_layers, use_inverted_bottleneck=False):
         yield model_keras, model_torch, {
             "n_channels": channels,
             "n_layers": n_layers,
+            "n_stacks": n_stacks,
             "use_inverted_bottleneck": use_inverted_bottleneck,
             "kernel_size": kernel_size,
             "dilation": dilation,

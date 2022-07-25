@@ -8,10 +8,15 @@ $ prepare_job -g fullrave.gin -p train_util.train.num_steps=100000 \
 import argparse
 import datetime
 import os
+import shutil
+import warnings
 
 from thesis.prepare_job_util import get_today_string, add_distinguishing_suffix
 
-HEADER = r"""
+HOME_DIR = os.path.expanduser("~")
+
+LSF_HEADER = r"""
+{comment}
 module load gcc/8.2.0
 module load python_gpu/3.8.5
 module load libsndfile ffmpeg eth_proxy cuda/11.1.1 cudnn/8.1.0.77
@@ -25,21 +30,39 @@ nvidia-smi
 
 """
 
-COMMAND_TEMPLATE = r"""
-SAVE_DIR={base_dir}/{job_dir}
-TRAIN_TFRECORD_FILEPATTERN={dataset_pattern} 
+SLURM_HEADER = r"""#!/bin/bash
+# {comment}
+#SBATCH --job-name={comment}
+#SBATCH --time=8:00:00
+#SBATCH --partition=amdrtx
+#SBATCH --constraint=gpu
+#SBATCH --mem=16G
+#SBATCH --cpus-per-task=4
+#SBATCH --ntasks=1
+#SBATCH --account=vvolhejn
+# Unused:
+#aSBATCH --output={save_dir}/slurm-%j.out
+#aSBATCH --partition=amdv100,intelv100,amdrtx,amda100
 
-{wandb_command}
+source ~/.bashrc
 
-nas_run \
-  --mode={mode} \
-  --alsologtostderr \
-  --save_dir="$SAVE_DIR" \
-  --allow_memory_growth \
-  --gin_search_path=/cluster/home/vvolhejn/thesis/gin/ \
-  {mode_specific_params} \
-  {gin_params}
+conda activate nas
+
+export CUDA_VISIBLE_DEVICES="{gpu_index}"
+export XLA_FLAGS="--xla_gpu_cuda_data_dir=/users/vvolhejn/miniconda3/envs/nas/lib"
+
+nvidia-smi
+
+mkdir -p {save_dir}
+
 """
+
+# #SBATCH --job-name=job_name
+# #SBATCH --time=01:00:00
+# #SBATCH --nodes=2
+# #SBATCH --ntasks-per-core=2
+# #SBATCH --ntasks-per-node=12
+# #SBATCH --cpus-per-task=2
 
 #   --gin_param="train_util.train.num_steps=2000000" \
 #   --gin_param="train_util.train.steps_per_save=10000" \
@@ -47,7 +70,7 @@ nas_run \
 DEFAULT_GIN_PARAMS = {
     "batch_size": "8",
     # "trainers.Trainer.checkpoints_to_keep": "5",
-    "checkpoints_to_keep": "5",
+    "checkpoints_to_keep": "1",
     # For evaluation
     # "compute_f0.model_name": "'spice-v2'",  # "'crepe-tiny'"
 }
@@ -72,10 +95,13 @@ def prepare_job(
     use_wandb,
     use_runtime,
     quantization,
+    gpu_index,
 ):
+    workload_manager = get_workload_manager()
 
-    job = f"#{comment}\n"
-    job += HEADER
+    job = SLURM_HEADER.format(
+        comment=comment, save_dir=os.path.join(base_dir, job_dir), gpu_index=gpu_index
+    )
 
     job += "wandb enabled\n" if use_wandb else "wandb disabled\n"
 
@@ -88,7 +114,7 @@ def prepare_job(
         "--alsologtostderr",
         '--save_dir="$SAVE_DIR"',
         "--allow_memory_growth",
-        "--gin_search_path=/cluster/home/vvolhejn/thesis/gin/",
+        f"--gin_search_path={HOME_DIR}/thesis/gin/",
     ]
 
     if use_runtime:
@@ -111,7 +137,9 @@ def prepare_job(
 
     params += [f'--gin_param="{k}={v}"' for (k, v) in gin_params.items()]
 
-    job += " \\\n  ".join(["nas_run"] + params)
+    command_executable = "nas_run" if (workload_manager == "lsf") else "srun nas_run"
+
+    job += " \\\n  ".join([command_executable] + params)
 
     return job
 
@@ -162,7 +190,7 @@ def console_entry_point():
     parser.add_argument(
         "-b",
         "--base-dir",
-        default="/cluster/scratch/vvolhejn/models",
+        default=f"{HOME_DIR}/models",
         help="Directory under which the models are saved",
     )
     parser.add_argument(
@@ -175,7 +203,7 @@ def console_entry_point():
     parser.add_argument(
         "-d",
         "--dataset",
-        default="'/cluster/home/vvolhejn/datasets/violin2/violin2.tfrecord-train*'",
+        default=f"'{HOME_DIR}/datasets/violin2/violin2.tfrecord-train*'",
         help="An absolute glob pattern of .tfrecord files to use",
     )
     parser.add_argument(
@@ -210,6 +238,12 @@ def console_entry_point():
         help="Whether the runtime from --use-runtime should use quantization",
         default=False,
         action="store_true",
+    )
+    parser.add_argument(
+        "--gpu-index",
+        help="Which GPU (0-indexed) to use",
+        type=int,
+        default=0,
     )
 
     args = parser.parse_args()
@@ -250,8 +284,19 @@ def console_entry_point():
         args.use_wandb,
         args.use_runtime,
         args.quantization,
+        args.gpu_index,
     )
     print(job)
+
+
+def get_workload_manager():
+    if shutil.which("squeue"):
+        return "slurm"
+    elif shutil.which("bjobs"):
+        return "lsf"
+    else:
+        warnings.warn("Unrecognized workload manager, defaulting to LSF")
+        return "lsf"
 
 
 if __name__ == "__main__":
