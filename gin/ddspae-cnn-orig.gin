@@ -1,7 +1,6 @@
 # -*-Python-*-
-# Decodes from (loudness, f0). Has a trainable reverb component as well.
-# Since it uses a trainable reverb, training data should all be from the same
-# acoustic environment.
+# Like ddspae-cnn.gin, but uses DilatedConvDecoder and not CustomDilatedConvDecoder.
+# Primarily for debugging
 
 include 'models/ae.gin'
 
@@ -11,19 +10,23 @@ import thesis.dilated_conv
 Autoencoder.encoder = None
 
 # Decoder
-Autoencoder.decoder = @CustomDilatedConvDecoder()
+Autoencoder.decoder = @decoders.DilatedConvDecoder()
 
-CustomDilatedConvDecoder:
+DilatedConvDecoder:
     ch = 128
     layers_per_stack = 3
     kernel_size = 3
     dilation = 3
 
+    norm_type = "layer"
     input_keys = ('ld_scaled', 'f0_scaled')
 
     stacks = 2
     # No resampling unlike in RAVE - DDSP expects the same sampling rate as for the f0 signal from the encoder.
 #    resample_stride = 2
+
+    conditioning_keys = None  # Nothing else than a latent, so no need to consider this separately
+    precondition_stack = None  # Not relevant since `conditioning_keys = None`
 
 #    output_splits = (('control_embedding', %decoder_output_channels),)
     output_splits = (('amps', 1),

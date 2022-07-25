@@ -101,3 +101,6 @@ Crop:
     crop_location = 'back'
 
 train_util.train.model_specific_summary_fn = @summarize_rave
+
+# Prevent overfitting to loss
+SpectralLoss.max_random_crop = 512

@@ -14,9 +14,9 @@ n_bands = 16  # because DATA_SIZE = 16
 # So there is no one equivalent value of `ch`.
 decoder_output_channels = 128
 
-get_model.model = @VariationalAutoencoder()
+get_model.model = @VAE()
 
-VariationalAutoencoder:
+VAE:
     preprocessor = @PQMFAnalysis()
     encoder = @RAVECNNEncoder()
     decoder = @decoders.DilatedConvDecoder()

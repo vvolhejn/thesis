@@ -5,4 +5,6 @@ evaluators = [
 ]
 
 nas_evaluate.evaluator_classes = %evaluators
-nas_evaluate.data_provider = @data.TFRecordProvider()
+#nas_evaluate.data_provider = @data.TFRecordProvider()
+nas_evaluate.data_provider = @data.WandbTFRecordProvider()
+WandbTFRecordProvider.file_suffix = "train"
