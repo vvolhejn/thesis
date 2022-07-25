@@ -15,7 +15,7 @@ def InvertedBottleneckBlock(
     expansion_rate=4,
     transpose=False,
     stride=1,  # **kwargs
-    batch_norm=True,
+    normalize=True,
     is_1d=True,
 ):
     """
@@ -38,15 +38,9 @@ def InvertedBottleneckBlock(
     # if is_1d:
     #     assert dilation_rate == 1
 
-    def maybe_batch_norm():
-        if batch_norm:
-            return [
-                tfkl.BatchNormalization(
-                    axis=channel_axis,
-                    epsilon=1e-3,
-                    momentum=0.999,
-                )
-            ]
+    def maybe_norm():
+        if normalize:
+            return [ddsp.training.nn.Normalize()]
         else:
             return []
 
@@ -66,7 +60,7 @@ def InvertedBottleneckBlock(
             #     use_bias=False,
             # )
         ]
-        + maybe_batch_norm()
+        + maybe_norm()
         + [
             tfkl.Activation(tf.nn.relu6),
             tfkl.DepthwiseConv2D(
@@ -79,7 +73,7 @@ def InvertedBottleneckBlock(
                 # **kwargs,
             ),
         ]
-        + maybe_batch_norm()
+        + maybe_norm()
         + [
             tfkl.Activation(tf.nn.relu6),
             # Project with a pointwise 1x1 convolution.
@@ -96,7 +90,7 @@ def InvertedBottleneckBlock(
             #     use_bias=False,
             # )
         ]
-        + maybe_batch_norm()
+        + maybe_norm()
     )
 
 
@@ -106,6 +100,7 @@ def BasicBlock(
     dilation_rate=1,
     stride=1,
     transpose=False,
+    use_activation=True,
     **kwargs,
 ):
     channel_axis = 1 if backend.image_data_format() == "channels_first" else -1
@@ -113,7 +108,8 @@ def BasicBlock(
     layer_class = tfkl.Conv2DTranspose if transpose else tfkl.Conv2D
 
     return tf.keras.Sequential(
-        [
+        ([tfkl.Activation(tf.nn.relu6)] if use_activation else [])
+        + [
             layer_class(
                 filters,
                 kernel_size=(kernel_size, 1),
@@ -123,12 +119,7 @@ def BasicBlock(
                 strides=(stride, 1),
                 **kwargs,
             ),
-            tfkl.BatchNormalization(
-                axis=channel_axis,
-                epsilon=1e-3,
-                momentum=0.999,
-            ),
-            tfkl.Activation(tf.nn.relu6),
+            ddsp.training.nn.Normalize(),
         ]
     )
 
@@ -220,7 +211,9 @@ class DilatedConvStack(tfkl.Layer):
                 )
 
         # Layers.
-        self.conv_in = conv(ch, kernel_size)
+        self.conv_in = BasicBlock(
+            filters=ch, kernel_size=kernel_size, use_activation=False
+        )
         self.layers = []
         self.norms = []
         self.resample_layers = []
