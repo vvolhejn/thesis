@@ -36,12 +36,12 @@ SLURM_HEADER = r"""#!/bin/bash
 #SBATCH --time=8:00:00
 #SBATCH --partition=amdrtx
 #SBATCH --constraint=gpu
-#SBATCH --mem=16G
+#SBATCH --mem=32G
 #SBATCH --cpus-per-task=4
 #SBATCH --ntasks=1
 #SBATCH --account=vvolhejn
+#SBATCH --output=/users/vvolhejn/slurm-%j.out
 # Unused:
-#aSBATCH --output={save_dir}/slurm-%j.out
 #aSBATCH --partition=amdv100,intelv100,amdrtx,amda100
 
 source ~/.bashrc

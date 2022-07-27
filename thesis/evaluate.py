@@ -61,6 +61,7 @@ def nas_evaluate(
       If the mode is 'eval', then returns a dictionary of Tensors keyed by loss
       type. Otherwise, returns None.
     """
+    save_dir = save_dir.rstrip("/")
 
     # Default to restoring from the save directory.
     restore_dir = save_dir if not restore_dir else restore_dir
@@ -76,14 +77,15 @@ def nas_evaluate(
 
     assert checkpoint_path is not None, f"No checkpoint found in {restore_dir}"
 
-    name = f"{get_today_string()}-eval-{os.path.basename(save_dir.rstrip('/'))}"
-
+    name_without_date = f"eval-{os.path.basename(save_dir)}"
     if use_runtime:
-        name += "-rt"
+        name_without_date += "-rt"
         if quantization:
-            name += "q"
+            name_without_date += "q"
 
-    wandb_run = wandb.init(
+    name = f"{get_today_string()}-{name_without_date}"
+
+    wandb.init(
         project="nas-evaluation",
         entity="neural-audio-synthesis-thesis",
         name=name,
@@ -93,15 +95,12 @@ def nas_evaluate(
             "num_batches": num_batches,
             "num_calibration_batches": num_calibration_batches,
             "calibration_method": calibration_method,
+            "operative_config": ddsp.training.train_util.config_string_to_markdown(
+                gin.operative_config_str()
+            ),
         },
         dir="/cluster/scratch/vvolhejn/wandb",
         tags=["eval"],
-    )
-
-    output_dir = os.path.join(
-        os.path.expanduser("~"),
-        "eval_data",
-        f"{os.path.basename(save_dir.rstrip('/'))}",
     )
 
     train_data_provider = data_provider
@@ -160,6 +159,9 @@ def nas_evaluate(
                 not quantization
             ), "Quantization cannot be applied without --use-runtime"
 
+        # Clear timers from when we might have run the model in initialization
+        Timer.timers.clear()
+
         logging.info(
             f"Predicting {num_batches if num_batches < 1e9 else 'all'} batches."
         )
@@ -187,7 +189,7 @@ def nas_evaluate(
             Timer.timers["Autoencoder"],
         )
 
-        log_timing_info(dataset, sample_rate, output_dir)
+        log_timing_info(dataset, sample_rate, name=name_without_date)
 
         timbre_transfer_data_provider = ddsp.training.data.WandbTFRecordProvider(
             "neural-audio-synthesis-thesis/transfer4:v0"
@@ -256,7 +258,7 @@ def evaluate_or_sample_batch(
             evaluator.sample(batch, outputs, step)
 
 
-def log_timing_info(dataset, sample_rate, output_dir):
+def log_timing_info(dataset, sample_rate, name):
     dummy_batch = next(iter(dataset))["audio"]
     batch_sample_length_secs = dummy_batch.shape[0] * dummy_batch.shape[1] / sample_rate
 
@@ -276,7 +278,7 @@ def log_timing_info(dataset, sample_rate, output_dir):
             "prediction_time_secs": Timer.timers.mean("Autoencoder"),
             "real_time_factor": Timer.timers.mean("Autoencoder")
             / batch_sample_length_secs,
-            "decoder_real_time_factor": Timer.timers.mean("decoder.dilated_cnn")
+            "decoder_real_time_factor": Timer.timers.mean("Autoencoder.decoder")
             / batch_sample_length_secs,
             "time_distribution": wandb.plot.bar(
                 table, "model_part", "mean", title="Time distribution"
@@ -285,8 +287,7 @@ def log_timing_info(dataset, sample_rate, output_dir):
         }
     )
 
-    os.makedirs(output_dir, exist_ok=True)
-    df = pd.DataFrame(
+   df = pd.DataFrame(
         index=pd.RangeIndex(len(Timer.timers._timings["Autoencoder"])),
         columns=Timer.timers._timings.keys(),
     )
@@ -299,9 +300,6 @@ def log_timing_info(dataset, sample_rate, output_dir):
         name = f"timing-{i}.csv"
         if not os.path.isfile(os.path.join(output_dir, name)):
             break
-
-    df.to_csv(os.path.join(output_dir, name))
-    df.to_csv(os.path.join(output_dir, "timing-latest.csv"))
 
 
 def plot_time_hierarchy(data: Dict[str, float]):
@@ -323,6 +321,9 @@ def plot_time_hierarchy(data: Dict[str, float]):
         values="value",
         branchvalues="total",
     )
+
+    # Do not sort by size, instead preserve order in which data is given
+    fig.update_traces(sort=False)
 
     return fig
 
