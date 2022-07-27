@@ -17,6 +17,7 @@ def InvertedBottleneckBlock(
     stride=1,  # **kwargs
     normalize=True,
     is_1d=True,
+    causal=False,
 ):
     """
     Expects input of shape [batch, time, 1, in_channels]
@@ -32,17 +33,18 @@ def InvertedBottleneckBlock(
         "is only included for signature compatibility and cannot be used."
     )
 
-    channel_axis = 1 if backend.image_data_format() == "channels_first" else -1
-    assert channel_axis == -1  # To use dense layers as conv2d layers
-
-    # if is_1d:
-    #     assert dilation_rate == 1
+    if not is_1d:
+        assert not causal, "2D convolutions cannot be causal."
 
     def maybe_norm():
         if normalize:
             return [ddsp.training.nn.Normalize()]
         else:
             return []
+
+    # Padding formula for causal convolutions from here:
+    # https://github.com/keras-team/keras/blob/07e13740fd181fc3ddec7d9a594d8a08666645f6/keras/layers/convolutional/base_conv.py#L356
+    left_pad = dilation_rate * (kernel_size - 1)
 
     return tf.keras.Sequential(
         [
@@ -61,13 +63,14 @@ def InvertedBottleneckBlock(
             # )
         ]
         + maybe_norm()
+        + [tfkl.Activation(tf.nn.relu6)]
+        + ([tfkl.ZeroPadding2D(((left_pad, 0), (0, 0)))] if causal else [])
         + [
-            tfkl.Activation(tf.nn.relu6),
             tfkl.DepthwiseConv2D(
                 # no channels argument since this is a depthwise conv
                 # should probably be (3, 1) for 1d, 3 for 2d
                 kernel_size=(kernel_size, 1) if is_1d else kernel_size,
-                padding="same",
+                padding="valid" if causal else "same",
                 use_bias=False,
                 dilation_rate=(dilation_rate, 1) if is_1d else dilation_rate,
                 # **kwargs,
@@ -99,28 +102,35 @@ def BasicBlock(
     kernel_size=3,
     dilation_rate=1,
     stride=1,
+    normalize=True,
     transpose=False,
     use_activation=True,
+    causal=False,
     **kwargs,
 ):
-    channel_axis = 1 if backend.image_data_format() == "channels_first" else -1
-
+    # Using 2D convolutions might be better for compatibility
     layer_class = tfkl.Conv2DTranspose if transpose else tfkl.Conv2D
+
+    # Padding formula for causal convolutions from here:
+    # https://github.com/keras-team/keras/blob/07e13740fd181fc3ddec7d9a594d8a08666645f6/keras/layers/convolutional/base_conv.py#L356
+    left_pad = dilation_rate * (kernel_size - 1)
 
     return tf.keras.Sequential(
         ([tfkl.Activation(tf.nn.relu6)] if use_activation else [])
+        + ([tfkl.ZeroPadding2D(((left_pad, 0), (0, 0)))] if causal else [])
         + [
             layer_class(
                 filters,
                 kernel_size=(kernel_size, 1),
-                padding="same",
+                padding="valid" if causal else "same",
+                # padding="valid" if causal else "same",
                 use_bias=False,
                 dilation_rate=(dilation_rate, 1),
                 strides=(stride, 1),
                 **kwargs,
             ),
-            ddsp.training.nn.Normalize(),
         ]
+        + ([ddsp.training.nn.Normalize()] if normalize else [])
     )
 
 
@@ -140,6 +150,8 @@ class DilatedConvStack(tfkl.Layer):
         stacks_per_resample=1,
         resample_after_convolve=True,
         use_inverted_bottleneck=False,
+        causal=False,
+        normalize=True,
     ):
         """Constructor.
 
@@ -178,6 +190,8 @@ class DilatedConvStack(tfkl.Layer):
             "resample_stride": resample_stride,
             "stacks_per_resample": stacks_per_resample,
             "resample_after_convolve": resample_after_convolve,
+            "causal": causal,
+            "normalize": normalize,
         }
 
         def conv(ch, k, stride=1, dilation=1, transpose=False):
@@ -194,6 +208,8 @@ class DilatedConvStack(tfkl.Layer):
                 stride=stride,
                 dilation_rate=dilation,
                 transpose=transpose,
+                causal=causal,
+                normalize=normalize,
             )
 
             return b
@@ -212,7 +228,11 @@ class DilatedConvStack(tfkl.Layer):
 
         # Layers.
         self.conv_in = BasicBlock(
-            filters=ch, kernel_size=kernel_size, use_activation=False
+            filters=ch,
+            kernel_size=kernel_size,
+            use_activation=False,
+            causal=causal,
+            normalize=normalize,
         )
         self.layers = []
         self.norms = []
@@ -325,6 +345,7 @@ class CustomDilatedConvDecoder(ddsp.training.nn.OutputSplitsLayer):
         stacks_per_resample=1,
         resample_after_convolve=True,
         use_inverted_bottleneck=False,
+        causal=False,
         input_keys=("ld_scaled", "f0_scaled"),
         output_splits=(("amps", 1), ("harmonic_distribution", 60)),
         **kwargs,
@@ -342,6 +363,7 @@ class CustomDilatedConvDecoder(ddsp.training.nn.OutputSplitsLayer):
             stacks_per_resample=stacks_per_resample,
             resample_after_convolve=resample_after_convolve,
             use_inverted_bottleneck=use_inverted_bottleneck,
+            causal=causal,
         )
 
     def compute_output(self, *inputs):

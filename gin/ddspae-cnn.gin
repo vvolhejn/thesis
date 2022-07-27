@@ -32,6 +32,8 @@ CustomDilatedConvDecoder:
 
     resample_after_convolve = False
 
+    causal = False
+
 # ==============
 # ProcessorGroup
 # ==============
