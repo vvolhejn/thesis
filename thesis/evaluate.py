@@ -287,19 +287,18 @@ def log_timing_info(dataset, sample_rate, name):
         }
     )
 
-   df = pd.DataFrame(
+    df = pd.DataFrame(
         index=pd.RangeIndex(len(Timer.timers._timings["Autoencoder"])),
         columns=Timer.timers._timings.keys(),
     )
     for k, v in Timer.timers._timings.items():
         df.loc[:, k] = v
 
-    i = 0
-    while True:
-        i += 1
-        name = f"timing-{i}.csv"
-        if not os.path.isfile(os.path.join(output_dir, name)):
-            break
+    path = os.path.join("/tmp", f"{name}.csv")
+    df.to_csv(path)
+    artifact = wandb.Artifact(name, type="timing")
+    artifact.add_file(path)
+    wandb.run.log_artifact(artifact)
 
 
 def plot_time_hierarchy(data: Dict[str, float]):

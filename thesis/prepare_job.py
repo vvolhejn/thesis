@@ -33,7 +33,7 @@ nvidia-smi
 SLURM_HEADER = r"""#!/bin/bash
 # {comment}
 #SBATCH --job-name={comment}
-#SBATCH --time=8:00:00
+#SBATCH --time=16:00:00
 #SBATCH --partition=amdrtx
 #SBATCH --constraint=gpu
 #SBATCH --mem=32G
