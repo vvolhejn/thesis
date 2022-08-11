@@ -1,28 +1,20 @@
-#eval all
+#!/bin/bash
 
-module load gcc/8.2.0
-module load python_gpu/3.8.5
-module load libsndfile ffmpeg eth_proxy cuda/11.1.1 cudnn/8.1.0.77
+#https://stackoverflow.com/questions/59895/how-do-i-get-the-directory-where-a-bash-script-is-located-from-within-the-script
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
-source venv/bin/activate
+script=$SCRIPT_DIR/evaluate_one.sh
+#names="0804-ddspae-cnn-4 0804-ddspae-cnn-7 0804-ddspae-cnn-8 0805-ddspae-cnn"
+#names="0809-ddspae-cnn-3 0809-ddspae-cnn-4"
+names="0726-ddspae-cnn 0809-ddspae-cnn-5 0809-ddspae-cnn-6 0809-ddspae-cnn-7"
 
-# Print machine info
-nvidia-smi
-#lscpu
-#hostnamectl
+for name in $names; do
+  echo "---------------- EVALUATING $name ----------------"
+  #SAVE_DIR=/cluster/scratch/vvolhejn/models/$name
 
-# 0324-halfrave-noiseless-4
-for name in 0324-fullrave-noiseless-1 0404-newt 0328-ddspae-cnn 0328-ddspae; do
-  SAVE_DIR=/cluster/scratch/vvolhejn/models/$name
-
-  nas_run \
-    --mode=eval \
-    --alsologtostderr \
-    --save_dir="$SAVE_DIR" \
-    --allow_memory_growth \
-    --gin_search_path=/cluster/home/vvolhejn/thesis/gin/ \
-    --gin_param="batch_size=1" \
-    --gin_param="F0LoudnessPreprocessor.compute_f0=True" \
-    --gin_param="compute_f0.model_name='spice-v2'" \
-    --wandb_group="0408-eval-2z"
+  for suffix in "--use_runtime" "--use_runtime --quantization"; do
+#  for suffix in "--use_runtime" "'--use_runtime --quantization"; do
+    echo $script urmp_tpt2:latest $name "$suffix"
+    $script urmp_tpt2:latest $name "$suffix"
+  done
 done

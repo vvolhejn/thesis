@@ -51,8 +51,9 @@ ProcessorGroup.dag = [
 
 # Reverb
 Reverb.name = 'reverb'
-Reverb.reverb_length = 48000
+Reverb.reverb_length = 16000
 Reverb.trainable = True
+#Reverb.decay_after = 16000
 
 # Log spectrograms.
 train_util.train.model_specific_summary_fn = @summarize_ddspae

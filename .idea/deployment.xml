@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="PublishConfigData" autoUpload="Always" serverName="vaclav@n1-west1-1:22 agent" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false" autoUploadExternalChanges="true">
+    <option name="confirmBeforeUploading" value="false" />
+    <serverData>
+      <paths name="Ault">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/users/vvolhejn/thesis" local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/users/vvolhejn/ddsp" local="$PROJECT_DIR$/../ddsp" web="/" />
+            <mapping deploy="/users/vvolhejn/jukebox" local="$PROJECT_DIR$/../jukebox" web="/" />
+          </mappings>
+          <excludedPaths>
+            <excludedPath local="true" path="$PROJECT_DIR$/data" />
+            <excludedPath local="true" path="$PROJECT_DIR$/cpp" />
+            <excludedPath local="true" path="$PROJECT_DIR$/notebooks" />
+          </excludedPaths>
+        </serverdata>
+      </paths>
+      <paths name="vaclav@n1-west1-1:22 agent">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/vaclav/thesis" local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/home/vaclav/ddsp" local="$PROJECT_DIR$/../ddsp" web="/" />
+            <mapping deploy="/Users/vaclav/prog/jukebox" local="$PROJECT_DIR$/../jukebox" web="/" />
+          </mappings>
+          <excludedPaths>
+            <excludedPath local="true" path="$PROJECT_DIR$/data" />
+            <excludedPath local="true" path="$PROJECT_DIR$/cpp" />
+            <excludedPath local="true" path="$PROJECT_DIR$/notebooks" />
+          </excludedPaths>
+        </serverdata>
+      </paths>
+    </serverData>
+    <option name="myAutoUpload" value="ALWAYS" />
+  </component>
+</project>

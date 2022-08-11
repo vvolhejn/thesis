@@ -15,7 +15,6 @@ import gin
 import pkg_resources
 import tensorflow as tf
 
-from thesis import evaluate
 from thesis.util import get_today_string
 
 gfile = tf.io.gfile
@@ -169,7 +168,7 @@ def allow_memory_growth():
 
 
 def main(unused_argv):
-    print("CUDA_VISIBLE_DEVICES:", os.environ.get("CUDA_VISIBLE_DEVICES"))
+    logging.info(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES')}")
 
     """Parse gin config and run ddsp training, evaluation, or sampling."""
     restore_dir = os.path.expanduser(FLAGS.restore_dir)
@@ -213,6 +212,8 @@ def main(unused_argv):
 
     # Evaluation.
     elif FLAGS.mode == "eval":
+        from thesis import evaluate
+
         model = models.get_model()
         evaluate.nas_evaluate(
             data_provider=gin.REQUIRED,

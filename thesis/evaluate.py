@@ -165,7 +165,12 @@ def nas_evaluate(
         logging.info(
             f"Predicting {num_batches if num_batches < 1e9 else 'all'} batches."
         )
+
+        # If we are predicting all batches, we don't know how many there'll be
+        num_batches_actual = 0
+
         for batch_idx in range(1, num_batches + 1):
+            num_batches_actual += 1
             # logging.info("Predicting batch %d of size %d", batch_idx, batch_size)
             try:
                 batch = next(dataset_iter)
@@ -203,7 +208,11 @@ def nas_evaluate(
         )
 
         sample_timbre_transfer(
-            model, data_provider, name="audio_both", every_nth=10, adjust=False
+            model,
+            data_provider,
+            name="audio_both",
+            every_nth=num_batches_actual // 20,
+            adjust=False,
         )
 
         if mode == "eval" or evaluate_and_sample:
@@ -328,6 +337,7 @@ def plot_time_hierarchy(data: Dict[str, float]):
 
 
 def sample_timbre_transfer(model, data_provider, name, every_nth=5, adjust=True):
+    every_nth = max(every_nth, 1)
     dataset = data_provider.get_batch(batch_size=1, shuffle=False, repeats=1)
 
     artifact = wandb.run.use_artifact(
@@ -366,7 +376,11 @@ def sample_timbre_transfer(model, data_provider, name, every_nth=5, adjust=True)
         )
 
         ddsp.training.summaries.audio_summary(
-            audio_both, step=i, sample_rate=sample_rate, name=name
+            audio_both,
+            step=i,
+            sample_rate=sample_rate,
+            name=name,
+            include_wandb_step=False,
         )
 
         logging.info(f"Predicted sample {i+1}")

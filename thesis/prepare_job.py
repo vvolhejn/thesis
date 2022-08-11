@@ -153,7 +153,7 @@ def create_job_dir(base_dir, name, gin_file):
     if name:
         res += f"-{name}"
 
-    res = add_distinguishing_suffix(base_dir, res)
+    res = add_distinguishing_suffix(base_dir, res, ignore_empty_dirs=False)
 
     return res
 

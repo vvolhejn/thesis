@@ -2,9 +2,9 @@ import os
 import contextlib
 
 import numpy as np
-import onnx
 
 try:
+    import onnx
     import tvm
     import tvm.relay as relay
     import tvm.autotvm

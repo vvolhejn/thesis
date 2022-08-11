@@ -10,7 +10,7 @@ def get_today_string():
     return date_s
 
 
-def add_distinguishing_suffix(base_dir, name):
+def add_distinguishing_suffix(base_dir, name, ignore_empty_dirs=True):
     """
     Choose a dir name that doesn't exist yet by trying to append '-1', '-2' and so on.
     n.b.: `base_dir` is not added to the beginning of the returned path.
@@ -24,7 +24,7 @@ def add_distinguishing_suffix(base_dir, name):
         path = os.path.expanduser(os.path.join(base_dir, candidate))
         if not os.path.exists(path):
             return candidate
-        elif os.path.isdir(path) and os.listdir(path) == []:
+        elif ignore_empty_dirs and os.path.isdir(path) and os.listdir(path) == []:
             # If the directory exists but is empty, this probably means an earlier
             # attempt at submission crashed. Reuse the directory in this case.
             return candidate

@@ -5,10 +5,10 @@ import note_seq
 from ddsp.training.plotting import specplot
 
 
-def play_audio(audio, sample_rate=16000):
+def play_audio(audio, sample_rate=16000, normalize=False):
     audio = np.array(audio)
     audio = np.squeeze(audio)
-    IPython.display.display(IPython.display.Audio(audio, rate=sample_rate))
+    IPython.display.display(IPython.display.Audio(audio, rate=sample_rate, normalize=normalize))
 
 
 def audio_bytes_to_np(wav_data,

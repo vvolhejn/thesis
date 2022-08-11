@@ -1,12 +1,28 @@
 import os
+import re
 
 import torch
-import onnxruntime.quantization as ortq
-import onnx
 import numpy as np
 import tensorflow as tf
-import tf2onnx
-import onnxruntime as ort
+
+try:
+    import onnxruntime.quantization as ortq
+    import onnx
+    import tf2onnx
+    import onnxruntime as ort
+except ImportError:
+    # This is ok if we're not planning to use the module.
+    import warnings
+
+    warnings.warn("Couldn't import ONNX Runtime")
+
+    class ortq:
+        class CalibrationMethod:
+            MinMax = None
+
+    onnx = None
+    tf2onnx = None
+    ort = None
 
 import thesis.util
 from . import Runtime, NeedsPyTorchModel
@@ -106,6 +122,42 @@ class ONNXRuntime(Runtime):
 
                 calib_moving_average = True
 
+                model = onnx.load(self.save_path)
+                nodes = [n.name for n in model.graph.node]
+                normalization_nodes = [
+                    n for n in nodes if re.search(r"/normalize_?[0-9]*/", n)
+                ]
+                # This part is needed for inverted bottleneck blocks:
+                # must_contain = [
+                #     "Reshape",
+                #     "moments/mean",
+                #     "sub",
+                #     #
+                #     "moments/SquaredDifference",
+                #     "moments/variance",
+                #     # "add",
+                #     "Sqrt",
+                #     #
+                #     "truediv",
+                #     "Reshape_1",
+                #     "mul/mul",
+                #     # "add_1/add",
+                # ]
+                # normalization_nodes = [
+                #     n
+                #     for n in normalization_nodes
+                #     if any([pattern in n for pattern in must_contain])
+                # ]
+
+                if normalization_nodes:
+                    print(
+                        f"Excluding {len(normalization_nodes)} normalization nodes"
+                        " from quantization."
+                    )
+                    # print("\n".join(normalization_nodes))
+                else:
+                    print("No normalization nodes found in model.")
+
                 save_path_2 = os.path.join(TEMP_DIR, self.get_id() + "_2.onnx")
                 ortq.quantize_static(
                     self.save_path,
@@ -123,6 +175,7 @@ class ONNXRuntime(Runtime):
                         "CalibMovingAverage": calib_moving_average,
                     },
                     calibrate_method=calibration_method,
+                    nodes_to_exclude=normalization_nodes,
                 )
                 print(
                     f"After static quantization with {calibration_method}"
