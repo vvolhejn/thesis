@@ -127,27 +127,30 @@ class ONNXRuntime(Runtime):
                 normalization_nodes = [
                     n for n in nodes if re.search(r"/normalize_?[0-9]*/", n)
                 ]
-                # This part is needed for inverted bottleneck blocks:
-                # must_contain = [
-                #     "Reshape",
-                #     "moments/mean",
-                #     "sub",
-                #     #
-                #     "moments/SquaredDifference",
-                #     "moments/variance",
-                #     # "add",
-                #     "Sqrt",
-                #     #
-                #     "truediv",
-                #     "Reshape_1",
-                #     "mul/mul",
-                #     # "add_1/add",
-                # ]
-                # normalization_nodes = [
-                #     n
-                #     for n in normalization_nodes
-                #     if any([pattern in n for pattern in must_contain])
-                # ]
+                # Inverted bottleneck models have depthwise convolutions.
+                is_inverted_bottleneck = any([("depthwise_conv2d" in n) for n in nodes])
+
+                if is_inverted_bottleneck:
+                    print("Detected inverted bottleneck network, limiting nodes_to_quantize")
+                    # This part is needed for inverted bottleneck blocks:
+                    must_contain = [
+                        "Reshape",
+                        "moments/mean",
+                        "sub",
+                        "moments/SquaredDifference",
+                        "moments/variance",
+                        # "add",  # Bad
+                        "Sqrt",
+                        "truediv",
+                        "Reshape_1",
+                        "mul/mul",
+                        # "add_1/add",  # Bad
+                    ]
+                    normalization_nodes = [
+                        n
+                        for n in normalization_nodes
+                        if any([pattern in n for pattern in must_contain])
+                    ]
 
                 if normalization_nodes:
                     print(
@@ -156,7 +159,7 @@ class ONNXRuntime(Runtime):
                     )
                     # print("\n".join(normalization_nodes))
                 else:
-                    print("No normalization nodes found in model.")
+                    print("No normalization nodes excluded from quantization.")
 
                 save_path_2 = os.path.join(TEMP_DIR, self.get_id() + "_2.onnx")
                 ortq.quantize_static(
@@ -172,6 +175,7 @@ class ONNXRuntime(Runtime):
                         # These are the defaults, but let's make it explicit
                         "WeightSymmetric": True,
                         "ActivationSymmetric": False,
+                        # Average min/max rather than global
                         "CalibMovingAverage": calib_moving_average,
                     },
                     calibrate_method=calibration_method,
