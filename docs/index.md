@@ -1,0 +1,42 @@
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>Reference</th>
+      <th>DDSP-full</th>
+      <th>DDSP-CNN</th>
+      <th>DDSP-CNN-Tiny</th>
+      <th>DDSP-CNN</th>
+      <th>DDSP-CNN-Tiny</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>0</th>
+      <td>audio/violin/sample_6_gt.wav</td>
+      <td>audio/violin/sample_6_0725-ddspae-2.wav</td>
+      <td>audio/violin/sample_6_0725-ddspae-cnn-1-rt.wav</td>
+      <td>audio/violin/sample_6_0809-ddspae-cnn-5-rt.wav</td>
+      <td>audio/violin/sample_6_0725-ddspae-cnn-1-rtq.wav</td>
+      <td>audio/violin/sample_6_0809-ddspae-cnn-5-rtq.wav</td>
+    </tr>
+    <tr>
+      <th>1</th>
+      <td>audio/violin/sample_8_gt.wav</td>
+      <td>audio/violin/sample_8_0725-ddspae-2.wav</td>
+      <td>audio/violin/sample_8_0725-ddspae-cnn-1-rt.wav</td>
+      <td>audio/violin/sample_8_0809-ddspae-cnn-5-rt.wav</td>
+      <td>audio/violin/sample_8_0725-ddspae-cnn-1-rtq.wav</td>
+      <td>audio/violin/sample_8_0809-ddspae-cnn-5-rtq.wav</td>
+    </tr>
+    <tr>
+      <th>2</th>
+      <td>audio/violin/sample_10_gt.wav</td>
+      <td>audio/violin/sample_10_0725-ddspae-2.wav</td>
+      <td>audio/violin/sample_10_0725-ddspae-cnn-1-rt.wav</td>
+      <td>audio/violin/sample_10_0809-ddspae-cnn-5-rt.wav</td>
+      <td>audio/violin/sample_10_0725-ddspae-cnn-1-rtq.wav</td>
+      <td>audio/violin/sample_10_0809-ddspae-cnn-5-rtq.wav</td>
+    </tr>
+  </tbody>
+</table>
