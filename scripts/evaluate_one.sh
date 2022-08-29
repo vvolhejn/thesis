@@ -16,7 +16,7 @@ nas_run \
   --gin_search_path=/home/vaclav/thesis/gin/ \
   --gin_param="evaluate_or_sample_batch.recompute_f0=True" \
   --gin_param="nas_evaluate.num_batches=-1" \
-  --gin_param="nas_evaluate.num_calibration_batches=100" \
+  --gin_param="nas_evaluate.num_calibration_batches=500" \
   --gin_param="F0LoudnessPreprocessor.compute_f0=True" \
   --gin_param="F0LoudnessPreprocessor.frame_rate=250" \
   --gin_param="compute_f0.model_name='crepe-tiny'" \

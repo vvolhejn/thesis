@@ -84,6 +84,7 @@ def nas_evaluate(
             name_without_date += "q"
 
     name = f"{get_today_string()}-{name_without_date}"
+    timbre_transfer_dataset = "transfer5:latest"
 
     wandb.init(
         project="nas-evaluation",
@@ -98,6 +99,7 @@ def nas_evaluate(
             "operative_config": ddsp.training.train_util.config_string_to_markdown(
                 gin.operative_config_str()
             ),
+            "timbre_transfer_dataset": timbre_transfer_dataset,
         },
         dir="/cluster/scratch/vvolhejn/wandb",
         tags=["eval"],
@@ -197,14 +199,16 @@ def nas_evaluate(
         log_timing_info(dataset, sample_rate, name=name_without_date)
 
         timbre_transfer_data_provider = ddsp.training.data.WandbTFRecordProvider(
-            "neural-audio-synthesis-thesis/transfer4:v0"
+            # "neural-audio-synthesis-thesis/transfer4:v0"
+            f"neural-audio-synthesis-thesis/{timbre_transfer_dataset}"
         )
 
         sample_timbre_transfer(
             model,
             timbre_transfer_data_provider,
             name="timbre_transfer",
-            every_nth=5,
+            every_nth=1,
+            dataset_stats_dir=train_data_provider.get_artifact_dir()
         )
 
         sample_timbre_transfer(
@@ -212,6 +216,7 @@ def nas_evaluate(
             data_provider,
             name="audio_both",
             every_nth=num_batches_actual // 20,
+            dataset_stats_dir=train_data_provider.get_artifact_dir(),
             adjust=False,
         )
 
@@ -336,19 +341,18 @@ def plot_time_hierarchy(data: Dict[str, float]):
     return fig
 
 
-def sample_timbre_transfer(model, data_provider, name, every_nth=5, adjust=True):
+def sample_timbre_transfer(model, data_provider, name, dataset_stats_dir, every_nth=5, adjust=True):
     every_nth = max(every_nth, 1)
     dataset = data_provider.get_batch(batch_size=1, shuffle=False, repeats=1)
 
-    artifact = wandb.run.use_artifact(
-        "neural-audio-synthesis-thesis/violin_dataset_statistics:latest",
-        type="dataset",
-    )
-    artifact_dir = artifact.download()
+    # artifact = wandb.run.use_artifact(
+    #     "neural-audio-synthesis-thesis/violin_dataset_statistics:latest",
+    #     type="dataset",
+    # )
+    # artifact_dir = artifact.download()
+    dataset_stats_path = os.path.join(dataset_stats_dir, "dataset_statistics.pkl")
 
-    dataset_stats = load_dataset_statistics(
-        os.path.join(artifact_dir, "dataset_statistics.pkl")
-    )
+    dataset_stats = load_dataset_statistics(dataset_stats_path)
 
     logging.info(f"Timbre transfer")
 
