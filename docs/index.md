@@ -1,5 +1,5 @@
 ---
-layout: post
+layout: page
 title: Accelerating Neural Audio Synthesis
 ---
 
@@ -7,7 +7,7 @@ These are audio samples for Václav Volhejn's Master thesis, _Accelerating Neura
 They showcase models that synthesize audio conditioned on pitch and loudness information.
 Given an input audio, we first extract its pitch (melody) and loudness.
 Then, given only these signals, the model tries to re-create the original sound.
-By training the model on a dataset of somebody plays a violin, it learns to create violin sounds.
+By training the model on a dataset of violin performances, it learns to create violin sounds.
 
 ![DDSP architecture diagram](ddsp-architecture.png)
 
@@ -21,15 +21,22 @@ The meaning of the rows is:
 - _Reference_ is the original audio file.
 - _DDSP-full_ is a baseline model from [Engel et al.](https://arxiv.org/abs/2001.04643). About 6M parameters.
 - _DDSP-CNN_ is our speed-optimized model (see thesis). About 300k parameters.
-- _DDSP-CNN-Q_ is a version of DDSP-CNN quantized using static quantization.
 - _DDSP-CNN-Tiny_ is a smaller speed-optimized model: it has **less than 2500 parameters**!
+- _DDSP-CNN-Q_ is a version of DDSP-CNN quantized using static quantization.
 - _DDSP-CNN-Tiny-Q_ is a version of DDSP-CNN-Tiny quantized using static quantization.
 
 ## Violin timbre transfer
 
-These models were trained on the same data as the [original DDSP](https://arxiv.org/abs/2001.04643) models, namely four violin pieces by John Gartner that are [accessible](https://musopen.org/music/13574-violin-partita-no-1-bwv-1002/) from the MusOpen royalty free music library\footnote.
+These models were trained on the same data as the [original DDSP](https://arxiv.org/abs/2001.04643) models, namely four violin pieces by John Gartner that are [accessible](https://musopen.org/music/13574-violin-partita-no-1-bwv-1002/) from the MusOpen royalty free music library.
 
-The reference samples used are from xxxx.
+The reference samples used are from various datasets:
+[URMP](https://labsites.rochester.edu/air/projects/URMP.html),
+[GuitarSet](https://guitarset.weebly.com/),
+[Good-Sounds](https://www.upf.edu/web/mtg/good-sounds),
+[SVNote](http://marg.snu.ac.kr/automatic-music-transcription/)
+and 
+[VocalSet](https://zenodo.org/record/1193957)
+.
 
 
 {::nomarkdown}
@@ -37,10 +44,10 @@ The reference samples used are from xxxx.
   <thead>
     <tr style="text-align: right;">
       <th></th>
-      <th>1</th>
-      <th>2</th>
-      <th>3</th>
-      <th>4</th>
+      <th>Guitar</th>
+      <th>Clarinet</th>
+      <th>Flute</th>
+      <th>Voice (m)</th>
     </tr>
   </thead>
   <tbody>
@@ -95,9 +102,9 @@ The reference samples used are from xxxx.
   <thead>
     <tr style="text-align: right;">
       <th></th>
-      <th>5</th>
-      <th>6</th>
-      <th>7</th>
+      <th>Saxophone</th>
+      <th>Guitar</th>
+      <th>Voice (f)</th>
     </tr>
   </thead>
   <tbody>
