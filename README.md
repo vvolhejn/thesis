@@ -1,5 +1,7 @@
 # Accelerating Neural Audio Synthesis
 
+[The thesis text itself is available here.](https://www.research-collection.ethz.ch/bitstream/handle/20.500.11850/571861/2/Volhejn_Vaclav.pdf)
+
 This is the code accompanying my Master's thesis at ETH Zürich titled _Accelerating Neural Audio Synthesis_. The goal was to create a fast model for synthesizing musical audio in real time, based on [DDSP](https://arxiv.org/abs/2001.04643) and [RAVE](https://arxiv.org/abs/2111.05011). The resulting DDSP-based model, DDSP-CNN-Tiny, has less than 2500 parameters and runs at over 800x real-time on a CPU, while maintaining the quality of the original DDSP-full with 6M parameters.
 
 Audio examples for the different models are available [here](https://vvolhejn.github.io/thesis/).
